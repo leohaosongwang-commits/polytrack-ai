@@ -1,0 +1,233 @@
+{
+  "rows": [
+    {
+      "sec": 1,
+      "state": {
+        "frames": 999,
+        "speedKmh": 68.207,
+        "x": 309.021,
+        "y": 55.346,
+        "z": 0,
+        "cp": 0,
+        "finishFrames": null
+      },
+      "hud": {
+        "timeMs": 999,
+        "speed": 68,
+        "cp": 0,
+        "cpTotal": 1
+      },
+      "match": {
+        "time": true,
+        "speed": true,
+        "cp": true
+      }
+    },
+    {
+      "sec": 2,
+      "state": {
+        "frames": 2000,
+        "speedKmh": 129.79,
+        "x": 281.335,
+        "y": 55.342,
+        "z": 0,
+        "cp": 0,
+        "finishFrames": null
+      },
+      "hud": {
+        "timeMs": 2000,
+        "speed": 129,
+        "cp": 0,
+        "cpTotal": 1
+      },
+      "match": {
+        "time": true,
+        "speed": true,
+        "cp": true
+      }
+    },
+    {
+      "sec": 3,
+      "state": {
+        "frames": 2999,
+        "speedKmh": 185.109,
+        "x": 237.501,
+        "y": 55.335,
+        "z": -0.001,
+        "cp": 0,
+        "finishFrames": null
+      },
+      "hud": {
+        "timeMs": 2999,
+        "speed": 185,
+        "cp": 0,
+        "cpTotal": 1
+      },
+      "match": {
+        "time": true,
+        "speed": true,
+        "cp": true
+      }
+    },
+    {
+      "sec": 4,
+      "state": {
+        "frames": 3999,
+        "speedKmh": 234.965,
+        "x": 179.029,
+        "y": 55.327,
+        "z": -0.005,
+        "cp": 0,
+        "finishFrames": null
+      },
+      "hud": {
+        "timeMs": 3999,
+        "speed": 234,
+        "cp": 0,
+        "cpTotal": 1
+      },
+      "match": {
+        "time": true,
+        "speed": true,
+        "cp": true
+      }
+    },
+    {
+      "sec": 5,
+      "state": {
+        "frames": 4999,
+        "speedKmh": 279.861,
+        "x": 107.41,
+        "y": 55.32,
+        "z": -0.012,
+        "cp": 0,
+        "finishFrames": null
+      },
+      "hud": {
+        "timeMs": 4999,
+        "speed": 279,
+        "cp": 0,
+        "cpTotal": 1
+      },
+      "match": {
+        "time": true,
+        "speed": true,
+        "cp": true
+      }
+    },
+    {
+      "sec": 6,
+      "state": {
+        "frames": 6000,
+        "speedKmh": 320.306,
+        "x": 23.865,
+        "y": 55.312,
+        "z": -0.024,
+        "cp": 1,
+        "finishFrames": null
+      },
+      "hud": {
+        "timeMs": 6000,
+        "speed": 320,
+        "cp": 1,
+        "cpTotal": 1
+      },
+      "match": {
+        "time": true,
+        "speed": true,
+        "cp": true
+      }
+    },
+    {
+      "sec": 7,
+      "state": {
+        "frames": 7000,
+        "speedKmh": 356.667,
+        "x": -70.252,
+        "y": 55.304,
+        "z": -0.037,
+        "cp": 1,
+        "finishFrames": null
+      },
+      "hud": {
+        "timeMs": 7000,
+        "speed": 356,
+        "cp": 1,
+        "cpTotal": 1
+      },
+      "match": {
+        "time": true,
+        "speed": true,
+        "cp": true
+      }
+    },
+    {
+      "sec": 8,
+      "state": {
+        "frames": 8000,
+        "speedKmh": 389.39,
+        "x": -173.956,
+        "y": 55.297,
+        "z": -0.052,
+        "cp": 1,
+        "finishFrames": null
+      },
+      "hud": {
+        "timeMs": 8000,
+        "speed": 389,
+        "cp": 1,
+        "cpTotal": 1
+      },
+      "match": {
+        "time": true,
+        "speed": true,
+        "cp": true
+      }
+    },
+    {
+      "sec": 9,
+      "state": {
+        "frames": 9000,
+        "speedKmh": 365.46,
+        "x": -280.098,
+        "y": 50.214,
+        "z": -0.068,
+        "cp": 1,
+        "finishFrames": 8215
+      },
+      "hud": {
+        "timeMs": 8215,
+        "speed": 395,
+        "cp": 1,
+        "cpTotal": 1
+      },
+      "match": {
+        "time": true,
+        "speed": null,
+        "cp": true
+      }
+    }
+  ],
+  "summary": {
+    "samples": 9,
+    "allTimeMatch": true,
+    "allSpeedMatch": true,
+    "allCpMatch": true,
+    "checkpointEvents": [
+      {
+        "frames": 5558,
+        "cp": 1
+      }
+    ],
+    "finishInfo": {
+      "finishFrames": 8215,
+      "firstSeenAtFrames": 9000
+    },
+    "hudTimesAfterFinish": [
+      "00:05.558",
+      "00:08.215",
+      "00:08.215"
+    ],
+    "note": "运行中 HUD 计时器 = 状态里的 frames(毫秒);完成后 HUD 显示的完成时间 = finishFrames"
+  }
+}

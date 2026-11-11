@@ -1,0 +1,80 @@
+{
+  "testDeterminism": true,
+  "rows": [
+    {
+      "frames": 20000,
+      "runs": [
+        {
+          "result": false,
+          "wallMs": 537.4000000003725,
+          "error": null
+        },
+        {
+          "result": false,
+          "wallMs": 546.7999999998137,
+          "error": null
+        },
+        {
+          "result": false,
+          "wallMs": 567.5,
+          "error": null
+        }
+      ],
+      "framesPerSec": [
+        37216,
+        36576,
+        35242
+      ]
+    },
+    {
+      "frames": 100000,
+      "runs": [
+        {
+          "result": false,
+          "wallMs": 1051.0999999996275,
+          "error": null
+        },
+        {
+          "result": false,
+          "wallMs": 1100.7999999998137,
+          "error": null
+        },
+        {
+          "result": false,
+          "wallMs": 1159.1000000000931,
+          "error": null
+        }
+      ],
+      "framesPerSec": [
+        95138,
+        90843,
+        86274
+      ]
+    },
+    {
+      "frames": 600000,
+      "runs": [
+        {
+          "result": false,
+          "wallMs": 3221,
+          "error": null
+        },
+        {
+          "result": false,
+          "wallMs": 3366.100000000093,
+          "error": null
+        },
+        {
+          "result": false,
+          "wallMs": 3211.8000000002794,
+          "error": null
+        }
+      ],
+      "framesPerSec": [
+        186278,
+        178248,
+        186811
+      ]
+    }
+  ]
+}

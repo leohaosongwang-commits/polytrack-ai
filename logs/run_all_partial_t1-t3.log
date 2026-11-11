@@ -1,0 +1,81 @@
+
+===== t1_speed.mjs =====
+A 未打补丁(真实时间): 5999 帧 / 6.00 s 真实时间 => 1.00x
+B1 虚拟Worker 步长=16.67ms(60Hz) 渲染640x360: 19999 帧 / 1.93 s => 10.4x | 与基线逐帧比较: {"equal":true,"compared":5999}
+B2 虚拟Worker 步长=100ms(上限) 渲染640x360: 19999 帧 / 1.85 s => 10.8x | 与基线逐帧比较: {"equal":true,"compared":5999}
+B3 虚拟Worker 步长=1ms(每步一帧) 渲染640x360: 19999 帧 / 2.22 s => 9.0x | 与基线逐帧比较: {"equal":true,"compared":5999}
+B4 虚拟Worker 步长=100ms 渲染1280x720: 19999 帧 / 3.21 s => 6.2x | 与基线逐帧比较: {"equal":true,"compared":5999}
+C1 虚拟Worker+虚拟主线程 步长=100ms(不渲染): 19999 帧 / 1.97 s => 10.1x | 与基线逐帧比较: {"equal":true,"compared":5999} | 主线程时钟: {"mainClockDeltaAfter60Ticks":1000,"dateNowAdvances":true}
+C2 虚拟Worker+虚拟主线程 步长=1ms(不渲染): 19999 帧 / 2.15 s => 9.3x | 与基线逐帧比较: {"equal":true,"compared":5999} | 主线程时钟: {"mainClockDeltaAfter60Ticks":1000,"dateNowAdvances":true}
+written logs/t1_speed.json
+
+===== t1b_offline_throughput.mjs =====
+游戏自带 testDeterminism(): true
+Verify 20000 帧 x3: 耗时 537ms, 547ms, 568ms => 37216, 36576, 35242 帧/秒 (实时 1000 帧/秒, 即 37x)
+Verify 100000 帧 x3: 耗时 1051ms, 1101ms, 1159ms => 95138, 90843, 86274 帧/秒 (实时 1000 帧/秒, 即 95x)
+Verify 600000 帧 x3: 耗时 3221ms, 3366ms, 3212ms => 186278, 178248, 186811 帧/秒 (实时 1000 帧/秒, 即 186x)
+
+===== t2_state.mjs =====
+t=1s  state: frames=999 v=68.2 x=309.0 cp=0 fin=null | HUD: {"timeMs":999,"speed":68,"cp":0,"cpTotal":1} | 一致: {"time":true,"speed":true,"cp":true}
+t=2s  state: frames=2000 v=129.8 x=281.3 cp=0 fin=null | HUD: {"timeMs":2000,"speed":129,"cp":0,"cpTotal":1} | 一致: {"time":true,"speed":true,"cp":true}
+t=3s  state: frames=2999 v=185.1 x=237.5 cp=0 fin=null | HUD: {"timeMs":2999,"speed":185,"cp":0,"cpTotal":1} | 一致: {"time":true,"speed":true,"cp":true}
+t=4s  state: frames=3999 v=235.0 x=179.0 cp=0 fin=null | HUD: {"timeMs":3999,"speed":234,"cp":0,"cpTotal":1} | 一致: {"time":true,"speed":true,"cp":true}
+t=5s  state: frames=4999 v=279.9 x=107.4 cp=0 fin=null | HUD: {"timeMs":4999,"speed":279,"cp":0,"cpTotal":1} | 一致: {"time":true,"speed":true,"cp":true}
+t=6s  state: frames=6000 v=320.3 x=23.9 cp=1 fin=null | HUD: {"timeMs":6000,"speed":320,"cp":1,"cpTotal":1} | 一致: {"time":true,"speed":true,"cp":true}
+t=7s  state: frames=7000 v=356.7 x=-70.3 cp=1 fin=null | HUD: {"timeMs":7000,"speed":356,"cp":1,"cpTotal":1} | 一致: {"time":true,"speed":true,"cp":true}
+t=8s  state: frames=8000 v=389.4 x=-174.0 cp=1 fin=null | HUD: {"timeMs":8000,"speed":389,"cp":1,"cpTotal":1} | 一致: {"time":true,"speed":true,"cp":true}
+t=9s  state: frames=9000 v=365.5 x=-280.1 cp=1 fin=8215 | HUD: {"timeMs":8215,"speed":395,"cp":1,"cpTotal":1} | 一致: {"time":true,"speed":null,"cp":true}
+{
+ "samples": 9,
+ "allTimeMatch": true,
+ "allSpeedMatch": true,
+ "allCpMatch": true,
+ "checkpointEvents": [
+  {
+   "frames": 5558,
+   "cp": 1
+  }
+ ],
+ "finishInfo": {
+  "finishFrames": 8215,
+  "firstSeenAtFrames": 9000
+ },
+ "hudTimesAfterFinish": [
+  "00:05.558",
+  "00:08.215",
+  "00:08.215"
+ ],
+ "note": "运行中 HUD 计时器 = 状态里的 frames(毫秒);完成后 HUD 显示的完成时间 = finishFrames"
+}
+
+===== t3_determinism.mjs =====
+S1 [fast_step100] 完成帧=8250 哈希=3cb4a4d6fcb2c92d64432852 检查点=[{"frames":5568,"cp":1}] 重生=[] 倍速≈3.54x 回放路径一致=true Verify=true (±1: {"minus1":false,"plus1":false}) 5次新Worker Verify=[true,true,true,true,true]
+S1 [fast_step100] 完成帧=8250 哈希=3cb4a4d6fcb2c92d64432852 检查点=[{"frames":5568,"cp":1}] 重生=[] 倍速≈3.77x 回放路径一致=true Verify=true (±1: {"minus1":false,"plus1":false})
+S1 [fast_step100] 完成帧=8250 哈希=3cb4a4d6fcb2c92d64432852 检查点=[{"frames":5568,"cp":1}] 重生=[] 倍速≈3.53x 回放路径一致=true Verify=true (±1: {"minus1":false,"plus1":false})
+S1 [render_60hz] 完成帧=8250 哈希=3cb4a4d6fcb2c92d64432852 检查点=[{"frames":5568,"cp":1}] 重生=[] 倍速≈0.38x 回放路径一致=true Verify=true (±1: {"minus1":false,"plus1":false})
+S1 [frame_by_frame] 完成帧=8250 哈希=3cb4a4d6fcb2c92d64432852 检查点=[{"frames":5568,"cp":1}] 重生=[] 倍速≈1.1x 回放路径一致=true Verify=true (±1: {"minus1":false,"plus1":false})
+S1 [odd_step_7_3] 完成帧=8250 哈希=3cb4a4d6fcb2c92d64432852 检查点=[{"frames":5568,"cp":1}] 重生=[] 倍速≈3.62x 回放路径一致=true Verify=true (±1: {"minus1":false,"plus1":false})
+S1 [realtime_1x] 完成帧=8250 哈希=3cb4a4d6fcb2c92d64432852 检查点=[{"frames":5568,"cp":1}] 重生=[] 倍速≈0.35x 回放路径一致=true Verify=true (±1: {"minus1":false,"plus1":false})
+=> 判定 S1 {"runs":7,"distinctOutcomes":1,"identical":true,"finishFrames":8250,"allReplayPathMatch":true,"allVerifyTrue":true}
+S2 [fast_step100] 完成帧=12585 哈希=ce4f1881d83de1f002c83174 检查点=[{"frames":5568,"cp":1}] 重生=[7001] 倍速≈4.64x 回放路径一致=true Verify=true (±1: {"minus1":false,"plus1":false}) 5次新Worker Verify=[true,true,true,true,true]
+S2 [fast_step100] 完成帧=12585 哈希=ce4f1881d83de1f002c83174 检查点=[{"frames":5568,"cp":1}] 重生=[7001] 倍速≈4.64x 回放路径一致=true Verify=true (±1: {"minus1":false,"plus1":false})
+S2 [fast_step100] 完成帧=12585 哈希=ce4f1881d83de1f002c83174 检查点=[{"frames":5568,"cp":1}] 重生=[7001] 倍速≈4.49x 回放路径一致=true Verify=true (±1: {"minus1":false,"plus1":false})
+S2 [render_60hz] 完成帧=12585 哈希=ce4f1881d83de1f002c83174 检查点=[{"frames":5568,"cp":1}] 重生=[7001] 倍速≈0.41x 回放路径一致=true Verify=true (±1: {"minus1":false,"plus1":false})
+S2 [frame_by_frame] 完成帧=12585 哈希=ce4f1881d83de1f002c83174 检查点=[{"frames":5568,"cp":1}] 重生=[7001] 倍速≈0.7x 回放路径一致=true Verify=true (±1: {"minus1":false,"plus1":false})
+S2 [odd_step_7_3] 完成帧=12585 哈希=ce4f1881d83de1f002c83174 检查点=[{"frames":5568,"cp":1}] 重生=[7001] 倍速≈4.56x 回放路径一致=true Verify=true (±1: {"minus1":false,"plus1":false})
+S2 [realtime_1x] 完成帧=12585 哈希=ce4f1881d83de1f002c83174 检查点=[{"frames":5568,"cp":1}] 重生=[7001] 倍速≈0.4x 回放路径一致=true Verify=true (±1: {"minus1":false,"plus1":false})
+=> 判定 S2 {"runs":7,"distinctOutcomes":1,"identical":true,"finishFrames":12585,"allReplayPathMatch":true,"allVerifyTrue":true}
+S3 [fast_step100] 完成帧=8250 哈希=3cb4a4d6fcb2c92d64432852 检查点=[{"frames":5568,"cp":1}] 重生=[] 倍速≈3.39x 回放路径一致=true Verify=true (±1: {"minus1":false,"plus1":false}) 5次新Worker Verify=[true,true,true,true,true]
+S3 [fast_step100] 完成帧=8250 哈希=3cb4a4d6fcb2c92d64432852 检查点=[{"frames":5568,"cp":1}] 重生=[] 倍速≈3.39x 回放路径一致=true Verify=true (±1: {"minus1":false,"plus1":false})
+S3 [fast_step100] 完成帧=8250 哈希=3cb4a4d6fcb2c92d64432852 检查点=[{"frames":5568,"cp":1}] 重生=[] 倍速≈3.66x 回放路径一致=true Verify=true (±1: {"minus1":false,"plus1":false})
+S3 [render_60hz] 完成帧=8250 哈希=3cb4a4d6fcb2c92d64432852 检查点=[{"frames":5568,"cp":1}] 重生=[] 倍速≈0.22x 回放路径一致=true Verify=true (±1: {"minus1":false,"plus1":false})
+S3 [frame_by_frame] 完成帧=8250 哈希=3cb4a4d6fcb2c92d64432852 检查点=[{"frames":5568,"cp":1}] 重生=[] 倍速≈0.81x 回放路径一致=true Verify=true (±1: {"minus1":false,"plus1":false})
+S3 [odd_step_7_3] 完成帧=8250 哈希=3cb4a4d6fcb2c92d64432852 检查点=[{"frames":5568,"cp":1}] 重生=[] 倍速≈3.16x 回放路径一致=true Verify=true (±1: {"minus1":false,"plus1":false})
+S3 [realtime_1x] 完成帧=8250 哈希=3cb4a4d6fcb2c92d64432852 检查点=[{"frames":5568,"cp":1}] 重生=[] 倍速≈0.22x 回放路径一致=true Verify=true (±1: {"minus1":false,"plus1":false})
+=> 判定 S3 {"runs":7,"distinctOutcomes":1,"identical":true,"finishFrames":8250,"allReplayPathMatch":true,"allVerifyTrue":true}
+对照(不打补丁, 真实时间, 墙钟注入) #1: 完成帧=8253 哈希=eaeee3d511e5a528e5f10140 记录到的转向翻转帧 left=[2040,2163] right=[2438,2558]
+对照(不打补丁, 真实时间, 墙钟注入) #2: 完成帧=8347 哈希=7d9d216807ad3b751d3a8d94 记录到的转向翻转帧 left=[2015,2187] right=[2423,2585]
+对照(不打补丁, 真实时间, 墙钟注入) #3: 完成帧=8226 哈希=4593447e3169b8b3f025a513 记录到的转向翻转帧 left=[2035,2171] right=[2427,2588]
+任务 3:全部一致 ✔
+
+===== t4_injection.mjs =====

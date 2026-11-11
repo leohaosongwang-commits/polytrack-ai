@@ -1,0 +1,8 @@
+A 未打补丁(真实时间): 5999 帧 / 6.00 s 真实时间 => 1.00x
+B1 虚拟Worker 步长=16.67ms(60Hz) 渲染640x360: 19999 帧 / 1.93 s => 10.4x | 与基线逐帧比较: {"equal":true,"compared":5999}
+B2 虚拟Worker 步长=100ms(上限) 渲染640x360: 19999 帧 / 1.85 s => 10.8x | 与基线逐帧比较: {"equal":true,"compared":5999}
+B3 虚拟Worker 步长=1ms(每步一帧) 渲染640x360: 19999 帧 / 2.22 s => 9.0x | 与基线逐帧比较: {"equal":true,"compared":5999}
+B4 虚拟Worker 步长=100ms 渲染1280x720: 19999 帧 / 3.21 s => 6.2x | 与基线逐帧比较: {"equal":true,"compared":5999}
+C1 虚拟Worker+虚拟主线程 步长=100ms(不渲染): 19999 帧 / 1.97 s => 10.1x | 与基线逐帧比较: {"equal":true,"compared":5999} | 主线程时钟: {"mainClockDeltaAfter60Ticks":1000,"dateNowAdvances":true}
+C2 虚拟Worker+虚拟主线程 步长=1ms(不渲染): 19999 帧 / 2.15 s => 9.3x | 与基线逐帧比较: {"equal":true,"compared":5999} | 主线程时钟: {"mainClockDeltaAfter60Ticks":1000,"dateNowAdvances":true}
+written logs/t1_speed.json

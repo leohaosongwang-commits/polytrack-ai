@@ -1,0 +1,238 @@
+赛道: 中线长度 1246 m, 4 个路点, 检查点 3 个; 评估 Worker 4 个
+基线(一直按住 W): 未完成(掉出赛道或超时), 到达中线进度 101 m
+阶段 A:滚动时域规划(CEM + WASM 快照)
+    t=240 v=17 s=19 d=0.0 y=55.3 flags=121 acts=WRWRWRWWWL
+    t=480 v=33 s=21 d=0.0 y=55.3 flags=121 acts=WWRWWRWWR
+    t=720 v=49 s=24 d=0.0 y=55.3 flags=121 acts=WWRWWWW
+    t=960 v=65 s=27 d=0.3 y=55.3 flags=121 acts=WRWWRWRWLWR
+    t=1200 v=80 s=32 d=0.0 y=55.3 flags=121 acts=WWWWWW
+  [规划] 步 5: 已提交 1200 帧, 速度 80 km/h, 评分 121.0, 用时 10.1s
+    t=1440 v=95 s=38 d=0.2 y=55.3 flags=121 acts=WWLWRWWLWL
+    t=1680 v=110 s=50 d=0.0 y=55.3 flags=121 acts=WRWRWLWWRW
+    t=1920 v=124 s=57 d=0.0 y=55.3 flags=121 acts=WRWWWLWWR
+    t=2160 v=138 s=66 d=0.0 y=55.3 flags=121 acts=WRWWWWLWR
+    t=2400 v=151 s=80 d=0.0 y=55.3 flags=121 acts=WRWRWRWRWWL
+  [规划] 步 10: 已提交 2400 帧, 速度 151 km/h, 评分 177.6, 用时 21.6s
+    t=2640 v=164 s=90 d=0.0 y=55.3 flags=121 acts=WLWLWWLWW
+    t=2880 v=177 s=101 d=0.0 y=55.3 flags=121 acts=WLWLWLWWLW
+    t=3120 v=189 s=113 d=0.2 y=55.3 flags=121 acts=WLWWLWRWRW
+    t=3360 v=202 s=126 d=0.0 y=55.3 flags=121 acts=WLWLWRWWW
+    t=3600 v=214 s=140 d=0.0 y=55.3 flags=121 acts=WWWWRWLW
+  [规划] 步 15: 已提交 3600 帧, 速度 214 km/h, 评分 261.4, 用时 31.5s
+    t=3840 v=225 s=154 d=0.0 y=55.3 flags=121 acts=WLWLWLWRWLWL
+    t=4080 v=236 s=169 d=0.0 y=55.3 flags=125 acts=WWLWLWRWW
+    t=4320 v=174 s=181 d=0.3 y=55.8 flags=5 acts=WLSSSWW
+    t=4560 v=170 s=193 d=0.7 y=55.5 flags=5 acts=WLWLWLWLWW
+    t=4800 v=167 s=204 d=0.0 y=54.6 flags=5 acts=WWWWRWW
+  [规划] 步 20: 已提交 4800 帧, 速度 167 km/h, 评分 251.0, 用时 39.2s
+    t=5040 v=164 s=213 d=2.5 y=53.3 flags=5 acts=WWWWWW
+    t=5280 v=161 s=223 d=3.1 y=51.8 flags=5 acts=WWWWWW
+    t=5520 v=158 s=233 d=3.6 y=50.0 flags=5 acts=WWWWWW
+    t=5760 v=156 s=243 d=3.9 y=48.0 flags=5 acts=WLWRWRWWS
+    t=6000 v=154 s=253 d=4.0 y=45.4 flags=5 acts=SSSSSS
+  [规划] 步 25: 已提交 6000 帧, 速度 154 km/h, 评分 153.8, 用时 45.8s
+    t=6240 v=154 s=263 d=3.8 y=42.2 flags=5 acts=SSSSWW
+    t=6480 v=155 s=273 d=3.3 y=38.2 flags=5 acts=SWWWSS
+    t=6720 v=157 s=283 d=2.6 y=33.6 flags=5 acts=WRWLWLSSS
+    t=6960 v=160 s=293 d=1.7 y=28.3 flags=5 acts=SSSSWLS
+    t=7200 v=162 s=303 d=0.7 y=22.3 flags=5 acts=WRWLWRWRWRS
+  [规划] 步 30: 已提交 7200 帧, 速度 162 km/h, 评分 215.4, 用时 52.5s
+    t=7440 v=165 s=312 d=0.0 y=15.6 flags=5 acts=SWRSWRWRWR
+    t=7680 v=168 s=320 d=0.0 y=8.5 flags=5 acts=SSSWLWRW
+    t=7920 v=171 s=328 d=0.3 y=0.8 flags=5 acts=SWRSWSWR
+    t=8160 v=64 s=333 d=0.9 y=1.0 flags=5 acts=WWWLSSS
+    t=8400 v=61 s=337 d=0.7 y=1.4 flags=5 acts=WRWLWLWRWW
+  [规划] 步 35: 已提交 8400 帧, 速度 61 km/h, 评分 382.3, 用时 59.8s
+    t=8640 v=61 s=341 d=0.4 y=1.3 flags=5 acts=WSSSSW
+    t=8880 v=61 s=345 d=0.5 y=0.6 flags=5 acts=WLWWSWLWL
+    t=9120 v=54 s=349 d=0.6 y=0.2 flags=125 acts=WRWRWRSWLWL
+    t=9360 v=69 s=353 d=0.6 y=0.2 flags=125 acts=WWWWLWW
+    t=9600 v=84 s=358 d=0.2 y=0.2 flags=125 acts=WLWLWWLWWL
+  [规划] 步 40: 已提交 9600 帧, 速度 84 km/h, 评分 439.9, 用时 68.2s
+    t=9840 v=99 s=364 d=0.0 y=0.2 flags=125 acts=WWLWWWWL
+    t=10080 v=102 s=370 d=0.0 y=0.2 flags=125 acts=SWWWWWR
+    t=10320 v=116 s=378 d=1.1 y=0.2 flags=125 acts=WWWLWWRWR
+    t=10560 v=118 s=385 d=0.1 y=0.2 flags=125 acts=WLSWRWLWWL
+    t=10800 v=133 s=394 d=0.5 y=0.2 flags=125 acts=WWWWWW
+  [规划] 步 45: 已提交 10800 帧, 速度 133 km/h, 评分 505.6, 用时 76.3s
+    t=11040 v=146 s=403 d=0.9 y=0.2 flags=125 acts=WWWWWW
+    t=11280 v=160 s=413 d=0.7 y=0.2 flags=125 acts=WWWWWW
+    t=11520 v=173 s=424 d=0.2 y=0.1 flags=125 acts=WWWWWW
+    t=11760 v=186 s=436 d=0.3 y=0.1 flags=125 acts=WWWWWW
+    t=12000 v=185 s=448 d=0.4 y=0.1 flags=125 acts=WRWWSWWR
+  [规划] 步 50: 已提交 12000 帧, 速度 185 km/h, 评分 554.8, 用时 84.8s
+    t=12240 v=197 s=461 d=0.0 y=0.1 flags=125 acts=WRWRWLWRWLW
+    t=12480 v=142 s=472 d=0.0 y=0.3 flags=37 acts=SSSWLWLWR
+    t=12720 v=138 s=481 d=0.0 y=0.7 flags=37 acts=SWRWRWRWRWL
+    t=12960 v=140 s=490 d=0.0 y=0.9 flags=13 acts=WWRWRWRWWR
+    t=13200 v=134 s=499 d=0.0 y=1.0 flags=5 acts=WRWRWWWLWR
+  [规划] 步 55: 已提交 13200 帧, 速度 134 km/h, 评分 564.2, 用时 97.1s
+    t=13440 v=108 s=508 d=0.4 y=0.8 flags=13 acts=SWWRWWWR
+    t=13680 v=102 s=515 d=0.0 y=0.7 flags=21 acts=WRWRWRWWRS
+    t=13920 v=98 s=520 d=0.0 y=0.5 flags=21 acts=WRWRWRSSW
+    t=14160 v=85 s=533 d=0.0 y=0.4 flags=125 acts=WLSWSSWL
+    t=14400 v=88 s=534 d=0.0 y=0.4 flags=125 acts=SWRWRWRWWR
+  [规划] 步 60: 已提交 14400 帧, 速度 88 km/h, 评分 558.8, 用时 108.4s
+    t=14640 v=82 s=535 d=0.0 y=0.4 flags=125 acts=SSWRWWRW
+    t=14880 v=72 s=532 d=0.4 y=0.4 flags=109 acts=WRSSWLWRWR
+    t=15120 v=55 s=535 d=0.0 y=0.5 flags=77 acts=SSWRWRSWR
+    t=15360 v=56 s=539 d=0.0 y=0.6 flags=125 acts=WRWRWRWRWS
+    t=15600 v=47 s=543 d=0.4 y=0.6 flags=61 acts=WRWRWRSSWR
+  [规划] 步 65: 已提交 15600 帧, 速度 47 km/h, 评分 556.1, 用时 120.1s
+    t=15840 v=54 s=544 d=0.0 y=0.5 flags=61 acts=WRWRWRWRWRW
+    t=16080 v=17 s=546 d=0.0 y=0.7 flags=69 acts=WLWWRWWLWL
+    t=16320 v=15 s=546 d=0.0 y=1.0 flags=69 acts=WWLWLWWLWR
+    t=16560 v=7 s=547 d=0.2 y=1.1 flags=85 acts=WWWWWWL
+    t=16800 v=9 s=547 d=0.7 y=1.1 flags=5 acts=WLWWRWSWR
+  [规划] 步 70: 已提交 16800 帧, 速度 9 km/h, 评分 563.5, 用时 139.2s
+    t=17040 v=13 s=553 d=0.8 y=0.9 flags=69 acts=SWRWRWWW
+    t=17280 v=17 s=554 d=0.0 y=0.8 flags=85 acts=WWRWRWRWW
+    t=17520 v=1 s=554 d=0.0 y=0.7 flags=37 acts=SWRSWSS
+    t=17760 v=12 s=554 d=0.0 y=0.7 flags=101 acts=WWLWLWWLWR
+    t=18000 v=25 s=556 d=0.0 y=0.7 flags=101 acts=WWWRWLWWR
+  [规划] 步 75: 已提交 18000 帧, 速度 25 km/h, 评分 581.8, 用时 155.6s
+    t=18240 v=32 s=558 d=0.5 y=0.7 flags=77 acts=WRWWRWRWWR
+    t=18480 v=35 s=560 d=0.0 y=0.7 flags=77 acts=WWWLSWLW
+    t=18720 v=36 s=557 d=1.0 y=0.7 flags=117 acts=WWWRWWS
+    t=18960 v=28 s=559 d=0.0 y=0.7 flags=21 acts=SWWLSWW
+    t=19200 v=21 s=561 d=0.0 y=0.5 flags=53 acts=WRWLSWLSWR
+  [规划] 步 80: 已提交 19200 帧, 速度 21 km/h, 评分 592.1, 用时 169.8s
+    t=19440 v=18 s=562 d=0.7 y=0.4 flags=125 acts=WRWWWWRS
+    t=19680 v=34 s=564 d=0.0 y=0.4 flags=125 acts=WWLWLWRWRWR
+    t=19920 v=39 s=567 d=0.0 y=0.4 flags=125 acts=WLWWLSWLWL
+    t=20160 v=35 s=569 d=0.0 y=0.4 flags=125 acts=SWSWWWL
+    t=20400 v=34 s=571 d=0.1 y=0.4 flags=85 acts=WWLWLWLWWL
+  [规划] 步 85: 已提交 20400 帧, 速度 34 km/h, 评分 591.1, 用时 181.8s
+    t=20640 v=32 s=574 d=0.3 y=0.5 flags=93 acts=WRWRWWLWLWL
+    t=20880 v=32 s=580 d=0.0 y=0.9 flags=69 acts=WLWLWWRWLWR
+    t=21120 v=39 s=583 d=0.5 y=1.2 flags=69 acts=WLWLWWWW
+    t=21360 v=42 s=585 d=0.0 y=1.3 flags=69 acts=WWWWWW
+    t=21600 v=41 s=588 d=0.0 y=1.1 flags=5 acts=WWWWWW
+  [规划] 步 90: 已提交 21600 帧, 速度 41 km/h, 评分 633.9, 用时 193.3s
+    t=21840 v=39 s=591 d=0.0 y=0.6 flags=13 acts=SWSWWLW
+    t=22080 v=38 s=593 d=0.0 y=0.2 flags=125 acts=WLWSWWRW
+    t=22320 v=53 s=596 d=0.0 y=0.2 flags=125 acts=WWRWRWRWW
+    t=22560 v=68 s=600 d=0.0 y=0.2 flags=125 acts=WRWWWWLW
+    t=22800 v=60 s=605 d=0.0 y=0.2 flags=125 acts=WRWLWSSWL
+  [规划] 步 95: 已提交 22800 帧, 速度 60 km/h, 评分 653.0, 用时 202.0s
+    t=23040 v=75 s=609 d=0.0 y=0.2 flags=125 acts=WLWRWWLWWL
+    t=23280 v=69 s=614 d=0.0 y=0.2 flags=125 acts=WRSWWRWRS
+    t=23520 v=84 s=619 d=0.0 y=0.2 flags=125 acts=WWLWLWRWW
+    t=23760 v=63 s=624 d=0.0 y=0.2 flags=125 acts=SSWWSWL
+    t=24000 v=56 s=627 d=0.0 y=0.2 flags=125 acts=SSWLWLWRWR
+  [规划] 步 100: 已提交 24000 帧, 速度 56 km/h, 评分 644.7, 用时 210.7s
+    t=24240 v=13 s=629 d=0.0 y=0.2 flags=125 acts=SSWSSS
+    t=24480 v=11 s=629 d=0.0 y=0.2 flags=125 acts=SSWWWRWR
+    t=24720 v=17 s=630 d=0.0 y=0.2 flags=125 acts=SWRWRWWW
+    t=24960 v=11 s=630 d=0.0 y=0.2 flags=125 acts=SWWRSWRW
+    t=25200 v=-0 s=631 d=0.0 y=0.2 flags=125 acts=WWRSSWLS
+  [规划] 步 105: 已提交 25200 帧, 速度 -0 km/h, 评分 643.4, 用时 218.7s
+    t=25440 v=17 s=632 d=0.2 y=0.2 flags=125 acts=WRWWWLWRW
+    t=25680 v=0 s=631 d=0.5 y=0.2 flags=125 acts=SWRWSWS
+    t=25920 v=-0 s=631 d=0.4 y=0.2 flags=125 acts=WSSWLWS
+    t=26160 v=17 s=631 d=0.0 y=0.2 flags=125 acts=WLWWRWRWW
+    t=26400 v=12 s=631 d=0.0 y=0.2 flags=125 acts=SSWRWLWW
+  [规划] 步 110: 已提交 26400 帧, 速度 12 km/h, 评分 644.2, 用时 226.8s
+    t=26640 v=6 s=631 d=0.0 y=0.2 flags=125 acts=SWWLSWW
+    t=26880 v=5 s=631 d=0.0 y=0.2 flags=125 acts=WLSWRSWRWR
+    t=27120 v=2 s=631 d=0.0 y=0.1 flags=125 acts=SWSWLSW
+    t=27360 v=9 s=631 d=0.0 y=0.1 flags=125 acts=WLWLSWWW
+    t=27600 v=0 s=631 d=0.0 y=0.1 flags=125 acts=SWSWWRS
+  [规划] 步 115: 已提交 27600 帧, 速度 0 km/h, 评分 642.7, 用时 235.0s
+    t=27840 v=8 s=631 d=0.0 y=0.1 flags=125 acts=SSWWWRWR
+    t=28080 v=14 s=631 d=0.0 y=0.1 flags=125 acts=WSWWWWR
+    t=28320 v=-0 s=631 d=0.0 y=0.1 flags=125 acts=WLWSSWRS
+    t=28560 v=6 s=631 d=0.0 y=0.1 flags=125 acts=WRWRWRSWLWR
+    t=28800 v=8 s=631 d=0.0 y=0.1 flags=125 acts=SWSWRWRW
+  [规划] 步 120: 已提交 28800 帧, 速度 8 km/h, 评分 641.7, 用时 243.3s
+    t=29040 v=8 s=631 d=0.1 y=0.1 flags=125 acts=WSSWRWLWL
+    t=29280 v=2 s=631 d=0.5 y=0.1 flags=125 acts=WWWRWSS
+    t=29520 v=9 s=631 d=0.4 y=0.1 flags=125 acts=SSWWWWL
+    t=29760 v=2 s=631 d=0.2 y=0.1 flags=125 acts=SWWRSSWR
+    t=30000 v=5 s=631 d=0.1 y=0.1 flags=125 acts=SWLWSWLWL
+  [规划] 步 125: 已提交 30000 帧, 速度 5 km/h, 评分 641.1, 用时 251.6s
+    t=30240 v=8 s=631 d=0.0 y=0.1 flags=125 acts=WSSWLWWR
+    t=30480 v=3 s=631 d=0.0 y=0.1 flags=125 acts=WLWLWSSWL
+    t=30720 v=11 s=631 d=0.0 y=0.1 flags=125 acts=WRSWLWWLWL
+    t=30960 v=7 s=631 d=0.0 y=0.1 flags=125 acts=SSSWWWL
+    t=31200 v=2 s=631 d=0.0 y=0.1 flags=125 acts=WWWRWRSS
+  [规划] 步 130: 已提交 31200 帧, 速度 2 km/h, 评分 641.3, 用时 259.8s
+    t=31440 v=8 s=631 d=0.0 y=0.1 flags=125 acts=SWSWLWRW
+    t=31680 v=-0 s=631 d=0.0 y=0.1 flags=125 acts=SWRSSSW
+    t=31920 v=12 s=631 d=0.0 y=0.1 flags=125 acts=SWRWRWRWLWL
+    t=32160 v=8 s=631 d=0.1 y=0.1 flags=125 acts=WLWLWLWLSS
+    t=32400 v=12 s=631 d=0.7 y=0.1 flags=125 acts=WRWLWRWSWR
+  [规划] 步 135: 已提交 32400 帧, 速度 12 km/h, 评分 638.4, 用时 268.2s
+    t=32640 v=11 s=631 d=0.4 y=0.1 flags=125 acts=SSWRWWW
+    t=32880 v=-1 s=631 d=0.3 y=0.1 flags=125 acts=SSWLWRSS
+    t=33120 v=-0 s=631 d=0.3 y=0.1 flags=125 acts=WRWSSSW
+    t=33360 v=0 s=631 d=0.3 y=0.1 flags=125 acts=WLWSSSWR
+    t=33600 v=0 s=631 d=0.4 y=0.1 flags=125 acts=SSSWRSW
+  [规划] 步 140: 已提交 33600 帧, 速度 0 km/h, 评分 639.7, 用时 276.3s
+    t=33840 v=0 s=631 d=0.5 y=0.1 flags=125 acts=SSSSWRWL
+    t=34080 v=2 s=631 d=0.5 y=0.1 flags=125 acts=WRSSWRSW
+    t=34320 v=-7 s=631 d=0.7 y=0.1 flags=125 acts=SSSSSS
+    t=34560 v=-7 s=631 d=0.5 y=0.1 flags=125 acts=SWRWLSSS
+    t=34800 v=6 s=631 d=0.4 y=0.1 flags=125 acts=SWLWLWLWW
+  [规划] 步 145: 已提交 34800 帧, 速度 6 km/h, 评分 641.0, 用时 284.6s
+    t=35040 v=1 s=631 d=0.3 y=0.1 flags=125 acts=SSSWLSW
+    t=35280 v=2 s=631 d=0.6 y=0.1 flags=125 acts=WLWLWLSSWR
+    t=35520 v=0 s=631 d=0.7 y=0.1 flags=125 acts=WRWLSWLWLS
+    t=35760 v=2 s=631 d=0.6 y=0.1 flags=125 acts=WWWRSSW
+    t=36000 v=-0 s=631 d=0.6 y=0.1 flags=125 acts=SSSWRWRS
+  [规划] 步 150: 已提交 36000 帧, 速度 -0 km/h, 评分 639.6, 用时 292.7s
+    t=36240 v=-3 s=631 d=0.6 y=0.1 flags=125 acts=SWWRSSS
+    t=36480 v=0 s=631 d=0.6 y=0.1 flags=125 acts=SWLWWLWRS
+    t=36720 v=-0 s=631 d=0.4 y=0.1 flags=125 acts=WWWRWRSS
+    t=36960 v=-4 s=631 d=0.4 y=0.1 flags=125 acts=SSWSSS
+    t=37200 v=-4 s=631 d=0.7 y=0.1 flags=125 acts=SSSSWW
+  [规划] 步 155: 已提交 37200 帧, 速度 -4 km/h, 评分 639.9, 用时 300.8s
+    t=37440 v=4 s=631 d=0.7 y=0.1 flags=125 acts=WRWSSWW
+    t=37680 v=5 s=631 d=0.7 y=0.1 flags=125 acts=WRSWSWLW
+    t=37920 v=8 s=631 d=0.5 y=0.1 flags=125 acts=WSSWWW
+    t=38160 v=2 s=631 d=0.5 y=0.1 flags=125 acts=SSSWSWR
+    t=38400 v=19 s=631 d=0.1 y=0.1 flags=125 acts=WRWWWWW
+  [规划] 步 160: 已提交 38400 帧, 速度 19 km/h, 评分 639.7, 用时 308.9s
+    t=38640 v=-1 s=631 d=0.0 y=0.1 flags=125 acts=SSSSSWL
+    t=38880 v=-5 s=631 d=0.2 y=0.1 flags=125 acts=SSSSSW
+    t=39120 v=-4 s=631 d=0.5 y=0.1 flags=125 acts=SSSSWRWR
+    t=39360 v=4 s=631 d=0.5 y=0.1 flags=125 acts=WRWSSWW
+    t=39600 v=2 s=631 d=0.3 y=0.1 flags=125 acts=SWRWWWLS
+  [规划] 步 165: 已提交 39600 帧, 速度 2 km/h, 评分 638.9, 用时 317.0s
+    t=39840 v=-6 s=631 d=0.3 y=0.1 flags=125 acts=WSSSSS
+    t=40080 v=11 s=631 d=0.2 y=0.1 flags=125 acts=WLWRWRWWRW
+    t=40320 v=4 s=631 d=0.0 y=0.1 flags=125 acts=WSSSWLWL
+    t=40560 v=-1 s=631 d=0.0 y=0.1 flags=125 acts=WSSSSW
+    t=40800 v=-3 s=631 d=0.0 y=0.1 flags=125 acts=WRWRWSSS
+  [规划] 步 170: 已提交 40800 帧, 速度 -3 km/h, 评分 640.3, 用时 325.0s
+    t=41040 v=-10 s=631 d=0.2 y=0.1 flags=125 acts=SSSSSS
+    t=41280 v=-14 s=631 d=0.7 y=0.1 flags=125 acts=SSWSSS
+    t=41520 v=-8 s=631 d=0.1 y=0.1 flags=125 acts=SWSSWRWR
+    t=41760 v=4 s=631 d=0.0 y=0.1 flags=125 acts=WWSWLWRWR
+    t=42000 v=9 s=631 d=0.2 y=0.1 flags=125 acts=WWSWWWL
+  [规划] 步 175: 已提交 42000 帧, 速度 9 km/h, 评分 640.7, 用时 333.3s
+    t=42240 v=8 s=631 d=0.5 y=0.1 flags=125 acts=WSSWRWW
+    t=42480 v=8 s=631 d=0.7 y=0.1 flags=125 acts=WRSSWWW
+    t=42720 v=-2 s=631 d=0.6 y=0.1 flags=125 acts=WSSWSS
+    t=42960 v=8 s=631 d=0.5 y=0.1 flags=125 acts=WRWLSWLWLWL
+    t=43200 v=-1 s=631 d=0.5 y=0.1 flags=125 acts=SSWWSS
+  [规划] 步 180: 已提交 43200 帧, 速度 -1 km/h, 评分 640.2, 用时 341.4s
+    t=43440 v=-2 s=631 d=0.4 y=0.1 flags=125 acts=WWLWSSS
+    t=43680 v=-1 s=631 d=0.3 y=0.1 flags=125 acts=WWRWRWRSS
+    t=43920 v=5 s=631 d=0.1 y=0.1 flags=125 acts=WLWLWWWS
+    t=44160 v=-1 s=631 d=0.1 y=0.1 flags=125 acts=WLSSSSWR
+    t=44400 v=3 s=631 d=0.1 y=0.1 flags=125 acts=SSSWWWL
+  [规划] 步 185: 已提交 44400 帧, 速度 3 km/h, 评分 638.2, 用时 349.6s
+    t=44640 v=0 s=631 d=0.0 y=0.1 flags=125 acts=WWSSSWR
+    t=44880 v=1 s=631 d=0.0 y=0.1 flags=125 acts=WLSWSSWL
+    t=45120 v=3 s=631 d=0.0 y=0.1 flags=125 acts=WLSSSWW
+file:///home/user/polytrack-ai/scripts/lib/solver.mjs:131
+    if (fin < 0) throw new Error('规划未能在 maxFrames 内冲线');
+                       ^
+
+Error: 规划未能在 maxFrames 内冲线
+    at Solver.plan (file:///home/user/polytrack-ai/scripts/lib/solver.mjs:131:24)
+    at async solveTrack (file:///home/user/polytrack-ai/scripts/solve.mjs:43:11)
+    at async file:///home/user/polytrack-ai/scripts/solve.mjs:80:13
+
+Node.js v22.23.4

@@ -1,0 +1,15 @@
+RS1_连续点按 [fast_step100] 完成帧=8215 哈希=8693953548afe19d2ea23839 局数=3 记录到的reset翻转帧=[] 游戏看到的重生上升沿=[] 回放路径一致=true Verify=true ±1={"minus1":false,"plus1":false}
+RS1_连续点按 [frame_by_frame] 完成帧=8215 哈希=8693953548afe19d2ea23839 局数=3 记录到的reset翻转帧=[] 游戏看到的重生上升沿=[] 回放路径一致=true Verify=true ±1={"minus1":false,"plus1":false}
+RS1_连续点按 [odd_step_7_3] 完成帧=8215 哈希=8693953548afe19d2ea23839 局数=3 记录到的reset翻转帧=[] 游戏看到的重生上升沿=[] 回放路径一致=true Verify=true ±1={"minus1":false,"plus1":false}
+RS1_连续点按 [render_60hz] 完成帧=12184 哈希=2e752c3a5611cab8f6787109 局数=1 记录到的reset翻转帧=[5600,5601,5900,5901,5902,5903,6600,6601] 游戏看到的重生上升沿=[5601,5901,5903,6601] 回放路径一致=true Verify=true ±1={"minus1":false,"plus1":false}
+=> 判定 RS1_连续点按 ✘ 存在不一致 distinct=2
+RS2_长按与改油门 [fast_step100] 完成帧=12084 哈希=46607b78449ae2d3cae517dd 局数=1 记录到的reset翻转帧=[6000,6110,6500,6501] 游戏看到的重生上升沿=[6001,6501] 回放路径一致=true Verify=true ±1={"minus1":false,"plus1":false}
+RS2_长按与改油门 [frame_by_frame] 完成帧=12084 哈希=6355d170f8b4aede08e6d6e0 局数=1 记录到的reset翻转帧=[6000,6001,6500,6501] 游戏看到的重生上升沿=[6001,6501] 回放路径一致=true Verify=true ±1={"minus1":false,"plus1":false}
+RS2_长按与改油门 [odd_step_7_3] 完成帧=12084 哈希=1c207ca8672dde9dabe6d846 局数=1 记录到的reset翻转帧=[6000,6111,6500,6501] 游戏看到的重生上升沿=[6001,6501] 回放路径一致=true Verify=true ±1={"minus1":false,"plus1":false}
+RS2_长按与改油门 [render_60hz] 完成帧=12084 哈希=46607b78449ae2d3cae517dd 局数=1 记录到的reset翻转帧=[6000,6110,6500,6501] 游戏看到的重生上升沿=[6001,6501] 回放路径一致=true Verify=true ±1={"minus1":false,"plus1":false}
+=> 判定 RS2_长按与改油门 ✘ 存在不一致 distinct=3
+RS3_整局重来后再重生 [fast_step100] 完成帧=8215 哈希=8693953548afe19d2ea23839 局数=4 记录到的reset翻转帧=[] 游戏看到的重生上升沿=[] 回放路径一致=true Verify=true ±1={"minus1":false,"plus1":false}
+RS3_整局重来后再重生 [frame_by_frame] 完成帧=8215 哈希=8693953548afe19d2ea23839 局数=4 记录到的reset翻转帧=[] 游戏看到的重生上升沿=[] 回放路径一致=true Verify=true ±1={"minus1":false,"plus1":false}
+RS3_整局重来后再重生 [odd_step_7_3] 完成帧=8215 哈希=8693953548afe19d2ea23839 局数=4 记录到的reset翻转帧=[] 游戏看到的重生上升沿=[] 回放路径一致=true Verify=true ±1={"minus1":false,"plus1":false}
+RS3_整局重来后再重生 [render_60hz] 完成帧=8215 哈希=8693953548afe19d2ea23839 局数=4 记录到的reset翻转帧=[] 游戏看到的重生上升沿=[] 回放路径一致=true Verify=true ±1={"minus1":false,"plus1":false}
+=> 判定 RS3_整局重来后再重生 ✔ 全部一致 distinct=1

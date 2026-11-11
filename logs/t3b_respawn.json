@@ -1,0 +1,614 @@
+{
+  "RS1_连续点按": [
+    {
+      "cfg": "fast_step100",
+      "wallMs": 4444,
+      "virtualMs": 21102,
+      "multiplier": 4.75,
+      "runs": 3,
+      "finishFrames": 8215,
+      "cutFrame": 8215,
+      "cpEvents": [
+        {
+          "frames": 5558,
+          "cp": 1
+        }
+      ],
+      "resetFrames": [],
+      "trajectoryHash": "8693953548afe19d2ea23839",
+      "nRows": 8215,
+      "recordedToggles": {
+        "up": [
+          0
+        ],
+        "right": [],
+        "down": [],
+        "left": [],
+        "reset": []
+      },
+      "finalPos": [
+        8215,
+        -197.40972900390625,
+        55.29594421386719,
+        -0.055861543864011765,
+        395.98077392578125
+      ],
+      "replayPathMatch": {
+        "equal": true,
+        "rows": 8215,
+        "firstDiff": null
+      },
+      "verifyAtFinish": true,
+      "verifyError": null,
+      "verifyNeighbors": {
+        "minus1": false,
+        "plus1": false
+      }
+    },
+    {
+      "cfg": "frame_by_frame",
+      "wallMs": 45635,
+      "virtualMs": 21102,
+      "multiplier": 0.46,
+      "runs": 3,
+      "finishFrames": 8215,
+      "cutFrame": 8215,
+      "cpEvents": [
+        {
+          "frames": 5558,
+          "cp": 1
+        }
+      ],
+      "resetFrames": [],
+      "trajectoryHash": "8693953548afe19d2ea23839",
+      "nRows": 8215,
+      "recordedToggles": {
+        "up": [
+          0
+        ],
+        "right": [],
+        "down": [],
+        "left": [],
+        "reset": []
+      },
+      "finalPos": [
+        8215,
+        -197.40972900390625,
+        55.29594421386719,
+        -0.055861543864011765,
+        395.98077392578125
+      ],
+      "replayPathMatch": {
+        "equal": true,
+        "rows": 8215,
+        "firstDiff": null
+      },
+      "verifyAtFinish": true,
+      "verifyError": null,
+      "verifyNeighbors": {
+        "minus1": false,
+        "plus1": false
+      }
+    },
+    {
+      "cfg": "odd_step_7_3",
+      "wallMs": 4421,
+      "virtualMs": 21102,
+      "multiplier": 4.77,
+      "runs": 3,
+      "finishFrames": 8215,
+      "cutFrame": 8215,
+      "cpEvents": [
+        {
+          "frames": 5558,
+          "cp": 1
+        }
+      ],
+      "resetFrames": [],
+      "trajectoryHash": "8693953548afe19d2ea23839",
+      "nRows": 8215,
+      "recordedToggles": {
+        "up": [
+          0
+        ],
+        "right": [],
+        "down": [],
+        "left": [],
+        "reset": []
+      },
+      "finalPos": [
+        8215,
+        -197.40972900390625,
+        55.29594421386719,
+        -0.055861543864011765,
+        395.98077392578125
+      ],
+      "replayPathMatch": {
+        "equal": true,
+        "rows": 8215,
+        "firstDiff": null
+      },
+      "verifyAtFinish": true,
+      "verifyError": null,
+      "verifyNeighbors": {
+        "minus1": false,
+        "plus1": false
+      }
+    },
+    {
+      "cfg": "render_60hz",
+      "wallMs": 35218,
+      "virtualMs": 12599,
+      "multiplier": 0.36,
+      "runs": 1,
+      "finishFrames": 12184,
+      "cutFrame": 12184,
+      "cpEvents": [
+        {
+          "frames": 5558,
+          "cp": 1
+        }
+      ],
+      "resetFrames": [
+        5601,
+        5901,
+        5903,
+        6601
+      ],
+      "trajectoryHash": "2e752c3a5611cab8f6787109",
+      "nRows": 12184,
+      "recordedToggles": {
+        "up": [
+          0
+        ],
+        "right": [],
+        "down": [],
+        "left": [],
+        "reset": [
+          5600,
+          5601,
+          5900,
+          5901,
+          5902,
+          5903,
+          6600,
+          6601
+        ]
+      },
+      "finalPos": [
+        12184,
+        -197.35313415527344,
+        55.31512451171875,
+        -0.018656771630048752,
+        304.0144958496094
+      ],
+      "replayPathMatch": {
+        "equal": true,
+        "rows": 12184,
+        "firstDiff": null
+      },
+      "verifyAtFinish": true,
+      "verifyError": null,
+      "verifyNeighbors": {
+        "minus1": false,
+        "plus1": false
+      }
+    }
+  ],
+  "RS2_长按与改油门": [
+    {
+      "cfg": "fast_step100",
+      "wallMs": 4069,
+      "virtualMs": 12501,
+      "multiplier": 3.07,
+      "runs": 1,
+      "finishFrames": 12084,
+      "cutFrame": 12084,
+      "cpEvents": [
+        {
+          "frames": 5558,
+          "cp": 1
+        }
+      ],
+      "resetFrames": [
+        6001,
+        6501
+      ],
+      "trajectoryHash": "46607b78449ae2d3cae517dd",
+      "nRows": 12084,
+      "recordedToggles": {
+        "up": [
+          0,
+          6150,
+          6301
+        ],
+        "right": [],
+        "down": [],
+        "left": [
+          6000,
+          6300
+        ],
+        "reset": [
+          6000,
+          6110,
+          6500,
+          6501
+        ]
+      },
+      "finalPos": [
+        12084,
+        -197.35313415527344,
+        55.31512451171875,
+        -0.0186567734926939,
+        304.0144958496094
+      ],
+      "replayPathMatch": {
+        "equal": true,
+        "rows": 12084,
+        "firstDiff": null
+      },
+      "verifyAtFinish": true,
+      "verifyError": null,
+      "verifyNeighbors": {
+        "minus1": false,
+        "plus1": false
+      }
+    },
+    {
+      "cfg": "frame_by_frame",
+      "wallMs": 17708,
+      "virtualMs": 12501,
+      "multiplier": 0.71,
+      "runs": 1,
+      "finishFrames": 12084,
+      "cutFrame": 12084,
+      "cpEvents": [
+        {
+          "frames": 5558,
+          "cp": 1
+        }
+      ],
+      "resetFrames": [
+        6001,
+        6501
+      ],
+      "trajectoryHash": "6355d170f8b4aede08e6d6e0",
+      "nRows": 12084,
+      "recordedToggles": {
+        "up": [
+          0,
+          6150,
+          6301
+        ],
+        "right": [],
+        "down": [],
+        "left": [
+          6000,
+          6300
+        ],
+        "reset": [
+          6000,
+          6001,
+          6500,
+          6501
+        ]
+      },
+      "finalPos": [
+        12084,
+        -197.35313415527344,
+        55.31512451171875,
+        -0.0186567734926939,
+        304.0144958496094
+      ],
+      "replayPathMatch": {
+        "equal": true,
+        "rows": 12084,
+        "firstDiff": null
+      },
+      "verifyAtFinish": true,
+      "verifyError": null,
+      "verifyNeighbors": {
+        "minus1": false,
+        "plus1": false
+      }
+    },
+    {
+      "cfg": "odd_step_7_3",
+      "wallMs": 3705,
+      "virtualMs": 12500,
+      "multiplier": 3.37,
+      "runs": 1,
+      "finishFrames": 12084,
+      "cutFrame": 12084,
+      "cpEvents": [
+        {
+          "frames": 5558,
+          "cp": 1
+        }
+      ],
+      "resetFrames": [
+        6001,
+        6501
+      ],
+      "trajectoryHash": "1c207ca8672dde9dabe6d846",
+      "nRows": 12084,
+      "recordedToggles": {
+        "up": [
+          0,
+          6150,
+          6301
+        ],
+        "right": [],
+        "down": [],
+        "left": [
+          6000,
+          6300
+        ],
+        "reset": [
+          6000,
+          6111,
+          6500,
+          6501
+        ]
+      },
+      "finalPos": [
+        12084,
+        -197.35313415527344,
+        55.31512451171875,
+        -0.0186567734926939,
+        304.0144958496094
+      ],
+      "replayPathMatch": {
+        "equal": true,
+        "rows": 12084,
+        "firstDiff": null
+      },
+      "verifyAtFinish": true,
+      "verifyError": null,
+      "verifyNeighbors": {
+        "minus1": false,
+        "plus1": false
+      }
+    },
+    {
+      "cfg": "render_60hz",
+      "wallMs": 42266,
+      "virtualMs": 12500,
+      "multiplier": 0.3,
+      "runs": 1,
+      "finishFrames": 12084,
+      "cutFrame": 12084,
+      "cpEvents": [
+        {
+          "frames": 5558,
+          "cp": 1
+        }
+      ],
+      "resetFrames": [
+        6001,
+        6501
+      ],
+      "trajectoryHash": "46607b78449ae2d3cae517dd",
+      "nRows": 12084,
+      "recordedToggles": {
+        "up": [
+          0,
+          6150,
+          6301
+        ],
+        "right": [],
+        "down": [],
+        "left": [
+          6000,
+          6300
+        ],
+        "reset": [
+          6000,
+          6110,
+          6500,
+          6501
+        ]
+      },
+      "finalPos": [
+        12084,
+        -197.35313415527344,
+        55.31512451171875,
+        -0.0186567734926939,
+        304.0144958496094
+      ],
+      "replayPathMatch": {
+        "equal": true,
+        "rows": 12084,
+        "firstDiff": null
+      },
+      "verifyAtFinish": true,
+      "verifyError": null,
+      "verifyNeighbors": {
+        "minus1": false,
+        "plus1": false
+      }
+    }
+  ],
+  "RS3_整局重来后再重生": [
+    {
+      "cfg": "fast_step100",
+      "wallMs": 3846,
+      "virtualMs": 25999,
+      "multiplier": 6.76,
+      "runs": 4,
+      "finishFrames": 8215,
+      "cutFrame": 8215,
+      "cpEvents": [
+        {
+          "frames": 5558,
+          "cp": 1
+        }
+      ],
+      "resetFrames": [],
+      "trajectoryHash": "8693953548afe19d2ea23839",
+      "nRows": 8215,
+      "recordedToggles": {
+        "up": [
+          0
+        ],
+        "right": [],
+        "down": [],
+        "left": [],
+        "reset": []
+      },
+      "finalPos": [
+        8215,
+        -197.40972900390625,
+        55.29594421386719,
+        -0.055861543864011765,
+        395.98077392578125
+      ],
+      "replayPathMatch": {
+        "equal": true,
+        "rows": 8215,
+        "firstDiff": null
+      },
+      "verifyAtFinish": true,
+      "verifyError": null,
+      "verifyNeighbors": {
+        "minus1": false,
+        "plus1": false
+      }
+    },
+    {
+      "cfg": "frame_by_frame",
+      "wallMs": 58672,
+      "virtualMs": 25999,
+      "multiplier": 0.44,
+      "runs": 4,
+      "finishFrames": 8215,
+      "cutFrame": 8215,
+      "cpEvents": [
+        {
+          "frames": 5558,
+          "cp": 1
+        }
+      ],
+      "resetFrames": [],
+      "trajectoryHash": "8693953548afe19d2ea23839",
+      "nRows": 8215,
+      "recordedToggles": {
+        "up": [
+          0
+        ],
+        "right": [],
+        "down": [],
+        "left": [],
+        "reset": []
+      },
+      "finalPos": [
+        8215,
+        -197.40972900390625,
+        55.29594421386719,
+        -0.055861543864011765,
+        395.98077392578125
+      ],
+      "replayPathMatch": {
+        "equal": true,
+        "rows": 8215,
+        "firstDiff": null
+      },
+      "verifyAtFinish": true,
+      "verifyError": null,
+      "verifyNeighbors": {
+        "minus1": false,
+        "plus1": false
+      }
+    },
+    {
+      "cfg": "odd_step_7_3",
+      "wallMs": 2981,
+      "virtualMs": 25999,
+      "multiplier": 8.72,
+      "runs": 4,
+      "finishFrames": 8215,
+      "cutFrame": 8215,
+      "cpEvents": [
+        {
+          "frames": 5558,
+          "cp": 1
+        }
+      ],
+      "resetFrames": [],
+      "trajectoryHash": "8693953548afe19d2ea23839",
+      "nRows": 8215,
+      "recordedToggles": {
+        "up": [
+          0
+        ],
+        "right": [],
+        "down": [],
+        "left": [],
+        "reset": []
+      },
+      "finalPos": [
+        8215,
+        -197.40972900390625,
+        55.29594421386719,
+        -0.055861543864011765,
+        395.98077392578125
+      ],
+      "replayPathMatch": {
+        "equal": true,
+        "rows": 8215,
+        "firstDiff": null
+      },
+      "verifyAtFinish": true,
+      "verifyError": null,
+      "verifyNeighbors": {
+        "minus1": false,
+        "plus1": false
+      }
+    },
+    {
+      "cfg": "render_60hz",
+      "wallMs": 28927,
+      "virtualMs": 25998,
+      "multiplier": 0.9,
+      "runs": 4,
+      "finishFrames": 8215,
+      "cutFrame": 8215,
+      "cpEvents": [
+        {
+          "frames": 5558,
+          "cp": 1
+        }
+      ],
+      "resetFrames": [],
+      "trajectoryHash": "8693953548afe19d2ea23839",
+      "nRows": 8215,
+      "recordedToggles": {
+        "up": [
+          0
+        ],
+        "right": [],
+        "down": [],
+        "left": [],
+        "reset": []
+      },
+      "finalPos": [
+        8215,
+        -197.40972900390625,
+        55.29594421386719,
+        -0.055861543864011765,
+        395.98077392578125
+      ],
+      "replayPathMatch": {
+        "equal": true,
+        "rows": 8215,
+        "firstDiff": null
+      },
+      "verifyAtFinish": true,
+      "verifyError": null,
+      "verifyNeighbors": {
+        "minus1": false,
+        "plus1": false
+      }
+    }
+  ]
+}

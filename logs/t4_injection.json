@@ -1,0 +1,158 @@
+{
+  "cfgs": [
+    "fast_step100",
+    "frame_by_frame"
+  ],
+  "all": {
+    "S1": {
+      "nEvents": 5,
+      "runs": [
+        {
+          "cfg": "fast_step100",
+          "finishFrames": 8250,
+          "hash": "3cb4a4d6fcb2c92d64432852",
+          "togglesExact": true,
+          "replayPathMatch": true,
+          "verify": true,
+          "multiplier": 3.38
+        },
+        {
+          "cfg": "frame_by_frame",
+          "finishFrames": 8250,
+          "hash": "3cb4a4d6fcb2c92d64432852",
+          "togglesExact": true,
+          "replayPathMatch": true,
+          "verify": true,
+          "multiplier": 1.07
+        }
+      ],
+      "identicalAcrossConfigs": true,
+      "ok": true
+    },
+    "S2": {
+      "nEvents": 7,
+      "runs": [
+        {
+          "cfg": "fast_step100",
+          "finishFrames": 12585,
+          "hash": "ce4f1881d83de1f002c83174",
+          "togglesExact": true,
+          "replayPathMatch": true,
+          "verify": true,
+          "multiplier": 4.51
+        },
+        {
+          "cfg": "frame_by_frame",
+          "finishFrames": 12585,
+          "hash": "ce4f1881d83de1f002c83174",
+          "togglesExact": true,
+          "replayPathMatch": true,
+          "verify": true,
+          "multiplier": 0.72
+        }
+      ],
+      "identicalAcrossConfigs": true,
+      "ok": true
+    },
+    "E1_edge": {
+      "nEvents": 11,
+      "runs": [
+        {
+          "cfg": "fast_step100",
+          "finishFrames": null,
+          "hash": "45e4a14a715dbfd2f06ff945",
+          "togglesExact": true,
+          "replayPathMatch": true,
+          "verify": null,
+          "multiplier": 2.33
+        },
+        {
+          "cfg": "frame_by_frame",
+          "finishFrames": null,
+          "hash": "45e4a14a715dbfd2f06ff945",
+          "togglesExact": true,
+          "replayPathMatch": true,
+          "verify": null,
+          "multiplier": 0.93
+        }
+      ],
+      "identicalAcrossConfigs": true,
+      "ok": true
+    },
+    "R1": {
+      "nEvents": 201,
+      "runs": [
+        {
+          "cfg": "fast_step100",
+          "finishFrames": null,
+          "hash": "311ea9b6b09550058202e396",
+          "togglesExact": true,
+          "replayPathMatch": true,
+          "verify": null,
+          "multiplier": 0.47
+        },
+        {
+          "cfg": "frame_by_frame",
+          "finishFrames": null,
+          "hash": "311ea9b6b09550058202e396",
+          "togglesExact": true,
+          "replayPathMatch": true,
+          "verify": null,
+          "multiplier": 0.34
+        }
+      ],
+      "identicalAcrossConfigs": true,
+      "ok": true
+    },
+    "R2": {
+      "nEvents": 200,
+      "runs": [
+        {
+          "cfg": "fast_step100",
+          "finishFrames": null,
+          "hash": "f0fc2526d487753687bba34d",
+          "togglesExact": true,
+          "replayPathMatch": true,
+          "verify": null,
+          "multiplier": 0.43
+        },
+        {
+          "cfg": "frame_by_frame",
+          "finishFrames": null,
+          "hash": "f0fc2526d487753687bba34d",
+          "togglesExact": true,
+          "replayPathMatch": true,
+          "verify": null,
+          "multiplier": 0.36
+        }
+      ],
+      "identicalAcrossConfigs": true,
+      "ok": true
+    },
+    "R3": {
+      "nEvents": 200,
+      "runs": [
+        {
+          "cfg": "fast_step100",
+          "finishFrames": null,
+          "hash": "d3a48981df97a74f4842697e",
+          "togglesExact": true,
+          "replayPathMatch": true,
+          "verify": null,
+          "multiplier": 0.41
+        },
+        {
+          "cfg": "frame_by_frame",
+          "finishFrames": null,
+          "hash": "d3a48981df97a74f4842697e",
+          "togglesExact": true,
+          "replayPathMatch": true,
+          "verify": null,
+          "multiplier": 0.35
+        }
+      ],
+      "identicalAcrossConfigs": true,
+      "ok": true
+    }
+  }
+}

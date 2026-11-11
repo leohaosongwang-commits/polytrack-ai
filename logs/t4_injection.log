@@ -1,0 +1,19 @@
+S1 [fast_step100] 事件=5 记录翻转帧==下发帧:true 完成帧=8250 哈希=3cb4a4d6fcb2c92d64432852 回放路径一致=true Verify=true
+S1 [frame_by_frame] 事件=5 记录翻转帧==下发帧:true 完成帧=8250 哈希=3cb4a4d6fcb2c92d64432852 回放路径一致=true Verify=true
+=> 判定 S1 ✔
+S2 [fast_step100] 事件=7 记录翻转帧==下发帧:true 完成帧=12585 哈希=ce4f1881d83de1f002c83174 回放路径一致=true Verify=true
+S2 [frame_by_frame] 事件=7 记录翻转帧==下发帧:true 完成帧=12585 哈希=ce4f1881d83de1f002c83174 回放路径一致=true Verify=true
+=> 判定 S2 ✔
+E1_edge [fast_step100] 事件=11 记录翻转帧==下发帧:true 完成帧=null 哈希=45e4a14a715dbfd2f06ff945 回放路径一致=true Verify=-
+E1_edge [frame_by_frame] 事件=11 记录翻转帧==下发帧:true 完成帧=null 哈希=45e4a14a715dbfd2f06ff945 回放路径一致=true Verify=-
+=> 判定 E1_edge ✔
+R1 [fast_step100] 事件=201 记录翻转帧==下发帧:true 完成帧=null 哈希=311ea9b6b09550058202e396 回放路径一致=true Verify=-
+R1 [frame_by_frame] 事件=201 记录翻转帧==下发帧:true 完成帧=null 哈希=311ea9b6b09550058202e396 回放路径一致=true Verify=-
+=> 判定 R1 ✔
+R2 [fast_step100] 事件=200 记录翻转帧==下发帧:true 完成帧=null 哈希=f0fc2526d487753687bba34d 回放路径一致=true Verify=-
+R2 [frame_by_frame] 事件=200 记录翻转帧==下发帧:true 完成帧=null 哈希=f0fc2526d487753687bba34d 回放路径一致=true Verify=-
+=> 判定 R2 ✔
+R3 [fast_step100] 事件=200 记录翻转帧==下发帧:true 完成帧=null 哈希=d3a48981df97a74f4842697e 回放路径一致=true Verify=-
+R3 [frame_by_frame] 事件=200 记录翻转帧==下发帧:true 完成帧=null 哈希=d3a48981df97a74f4842697e 回放路径一致=true Verify=-
+=> 判定 R3 ✔
+任务 4:帧精确且可复现 ✔

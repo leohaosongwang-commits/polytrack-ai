@@ -1,0 +1,31 @@
+t=1s  state: frames=999 v=68.2 x=309.0 cp=0 fin=null | HUD: {"timeMs":999,"speed":68,"cp":0,"cpTotal":1} | 一致: {"time":true,"speed":true,"cp":true}
+t=2s  state: frames=2000 v=129.8 x=281.3 cp=0 fin=null | HUD: {"timeMs":2000,"speed":129,"cp":0,"cpTotal":1} | 一致: {"time":true,"speed":true,"cp":true}
+t=3s  state: frames=2999 v=185.1 x=237.5 cp=0 fin=null | HUD: {"timeMs":2999,"speed":185,"cp":0,"cpTotal":1} | 一致: {"time":true,"speed":true,"cp":true}
+t=4s  state: frames=3999 v=235.0 x=179.0 cp=0 fin=null | HUD: {"timeMs":3999,"speed":234,"cp":0,"cpTotal":1} | 一致: {"time":true,"speed":true,"cp":true}
+t=5s  state: frames=4999 v=279.9 x=107.4 cp=0 fin=null | HUD: {"timeMs":4999,"speed":279,"cp":0,"cpTotal":1} | 一致: {"time":true,"speed":true,"cp":true}
+t=6s  state: frames=6000 v=320.3 x=23.9 cp=1 fin=null | HUD: {"timeMs":6000,"speed":320,"cp":1,"cpTotal":1} | 一致: {"time":true,"speed":true,"cp":true}
+t=7s  state: frames=7000 v=356.7 x=-70.3 cp=1 fin=null | HUD: {"timeMs":7000,"speed":356,"cp":1,"cpTotal":1} | 一致: {"time":true,"speed":true,"cp":true}
+t=8s  state: frames=8000 v=389.4 x=-174.0 cp=1 fin=null | HUD: {"timeMs":8000,"speed":389,"cp":1,"cpTotal":1} | 一致: {"time":true,"speed":true,"cp":true}
+t=9s  state: frames=9000 v=365.5 x=-280.1 cp=1 fin=8215 | HUD: {"timeMs":8215,"speed":395,"cp":1,"cpTotal":1} | 一致: {"time":true,"speed":null,"cp":true}
+{
+ "samples": 9,
+ "allTimeMatch": true,
+ "allSpeedMatch": true,
+ "allCpMatch": true,
+ "checkpointEvents": [
+  {
+   "frames": 5558,
+   "cp": 1
+  }
+ ],
+ "finishInfo": {
+  "finishFrames": 8215,
+  "firstSeenAtFrames": 9000
+ },
+ "hudTimesAfterFinish": [
+  "00:05.558",
+  "00:08.215",
+  "00:08.215"
+ ],
+ "note": "运行中 HUD 计时器 = 状态里的 frames(毫秒);完成后 HUD 显示的完成时间 = finishFrames"
+}

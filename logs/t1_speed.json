@@ -1,0 +1,346 @@
+[
+  {
+    "name": "A 未打补丁(真实时间)",
+    "wallMs": 6000.529334,
+    "frames": 5999,
+    "multiplier": 0.9997451334849187,
+    "trajectoryHeadTail": [
+      [
+        1,
+        318.6499938964844,
+        55.3499870300293,
+        20,
+        0.03535199910402298,
+        0,
+        1,
+        null
+      ],
+      [
+        1000,
+        309.0018310546875,
+        55.34617614746094,
+        20,
+        68.27153778076172,
+        0,
+        1,
+        null
+      ],
+      [
+        5999,
+        246.30303955078125,
+        55.38832092285156,
+        -3.8943428993225098,
+        0.06877269595861435,
+        0,
+        1,
+        null
+      ]
+    ]
+  },
+  {
+    "name": "B1 虚拟Worker 步长=16.67ms(60Hz) 渲染640x360",
+    "step": 16.666666666666668,
+    "mainVirtual": false,
+    "viewport": {
+      "width": 640,
+      "height": 360
+    },
+    "wallMs": 1927.3469179999956,
+    "frames": 19999,
+    "multiplier": 10.376440179619,
+    "hud": "Press R/Enter to return to the last checkpoint. Press T/Backspace to start over. Loading replay100% 0/3 0km/h Record --- Current 00:19.999 Difference --- Summer 1 No record Exit Watch Next Track",
+    "mainNowCheck": null,
+    "vsBaseline": {
+      "equal": true,
+      "compared": 5999
+    },
+    "trajectoryHeadTail": [
+      [
+        1,
+        318.6499938964844,
+        55.3499870300293,
+        20,
+        0.03535199910402298,
+        0,
+        1,
+        null
+      ],
+      [
+        1000,
+        309.0018310546875,
+        55.34617614746094,
+        20,
+        68.27153778076172,
+        0,
+        1,
+        null
+      ],
+      [
+        19999,
+        246.55673217773438,
+        55.448543548583984,
+        -3.94973087310791,
+        0.1049862951040268,
+        0,
+        1,
+        null
+      ]
+    ]
+  },
+  {
+    "name": "B2 虚拟Worker 步长=100ms(上限) 渲染640x360",
+    "step": 100,
+    "mainVirtual": false,
+    "viewport": {
+      "width": 640,
+      "height": 360
+    },
+    "wallMs": 1845.1044749999965,
+    "frames": 19999,
+    "multiplier": 10.838952628956166,
+    "hud": "Press R/Enter to return to the last checkpoint. Press T/Backspace to start over. Loading replay100% 0/3 0km/h Record --- Current 00:19.999 Difference --- Summer 1 No record Exit Watch Next Track",
+    "mainNowCheck": null,
+    "vsBaseline": {
+      "equal": true,
+      "compared": 5999
+    },
+    "trajectoryHeadTail": [
+      [
+        1,
+        318.6499938964844,
+        55.3499870300293,
+        20,
+        0.03535199910402298,
+        0,
+        1,
+        null
+      ],
+      [
+        1000,
+        309.0018310546875,
+        55.34617614746094,
+        20,
+        68.27153778076172,
+        0,
+        1,
+        null
+      ],
+      [
+        19999,
+        246.55673217773438,
+        55.448543548583984,
+        -3.94973087310791,
+        0.1049862951040268,
+        0,
+        1,
+        null
+      ]
+    ]
+  },
+  {
+    "name": "B3 虚拟Worker 步长=1ms(每步一帧) 渲染640x360",
+    "step": 1,
+    "mainVirtual": false,
+    "viewport": {
+      "width": 640,
+      "height": 360
+    },
+    "wallMs": 2216.9694599999857,
+    "frames": 19999,
+    "multiplier": 9.020873025467896,
+    "hud": "Press R/Enter to return to the last checkpoint. Press T/Backspace to start over. Loading replay100% 0/3 0km/h Record --- Current 00:19.999 Difference --- Summer 1 No record Exit Watch Next Track",
+    "mainNowCheck": null,
+    "vsBaseline": {
+      "equal": true,
+      "compared": 5999
+    },
+    "trajectoryHeadTail": [
+      [
+        1,
+        318.6499938964844,
+        55.3499870300293,
+        20,
+        0.03535199910402298,
+        0,
+        1,
+        null
+      ],
+      [
+        1000,
+        309.0018310546875,
+        55.34617614746094,
+        20,
+        68.27153778076172,
+        0,
+        1,
+        null
+      ],
+      [
+        19999,
+        246.55673217773438,
+        55.448543548583984,
+        -3.94973087310791,
+        0.1049862951040268,
+        0,
+        1,
+        null
+      ]
+    ]
+  },
+  {
+    "name": "B4 虚拟Worker 步长=100ms 渲染1280x720",
+    "step": 100,
+    "mainVirtual": false,
+    "viewport": {
+      "width": 1280,
+      "height": 720
+    },
+    "wallMs": 3211.1128509999908,
+    "frames": 19999,
+    "multiplier": 6.228058909163532,
+    "hud": "Press R/Enter to return to the last checkpoint. Press T/Backspace to start over. Loading replay100% 0/3 0km/h Record --- Current 00:19.999 Difference --- Summer 1 No record Exit Watch Next Track",
+    "mainNowCheck": null,
+    "vsBaseline": {
+      "equal": true,
+      "compared": 5999
+    },
+    "trajectoryHeadTail": [
+      [
+        1,
+        318.6499938964844,
+        55.3499870300293,
+        20,
+        0.03535199910402298,
+        0,
+        1,
+        null
+      ],
+      [
+        1000,
+        309.0018310546875,
+        55.34617614746094,
+        20,
+        68.27153778076172,
+        0,
+        1,
+        null
+      ],
+      [
+        19999,
+        246.55673217773438,
+        55.448543548583984,
+        -3.94973087310791,
+        0.1049862951040268,
+        0,
+        1,
+        null
+      ]
+    ]
+  },
+  {
+    "name": "C1 虚拟Worker+虚拟主线程 步长=100ms(不渲染)",
+    "step": 100,
+    "mainVirtual": true,
+    "viewport": {
+      "width": 640,
+      "height": 360
+    },
+    "wallMs": 1973.1237519999922,
+    "frames": 19999,
+    "multiplier": 10.135704858718906,
+    "hud": "Reach the first checkpoint! (0/3) Checkpoints have a yellow banner. All checkpoints must be collected before reaching the finish line. Loading replay100% 0/3 0km/h Record --- Current 00:19.999 Differe",
+    "mainNowCheck": {
+      "mainClockDeltaAfter60Ticks": 1000,
+      "dateNowAdvances": true
+    },
+    "vsBaseline": {
+      "equal": true,
+      "compared": 5999
+    },
+    "trajectoryHeadTail": [
+      [
+        1,
+        318.6499938964844,
+        55.3499870300293,
+        20,
+        0.03535199910402298,
+        0,
+        1,
+        null
+      ],
+      [
+        1000,
+        309.0018310546875,
+        55.34617614746094,
+        20,
+        68.27153778076172,
+        0,
+        1,
+        null
+      ],
+      [
+        19999,
+        246.55673217773438,
+        55.448543548583984,
+        -3.94973087310791,
+        0.1049862951040268,
+        0,
+        1,
+        null
+      ]
+    ]
+  },
+  {
+    "name": "C2 虚拟Worker+虚拟主线程 步长=1ms(不渲染)",
+    "step": 1,
+    "mainVirtual": true,
+    "viewport": {
+      "width": 640,
+      "height": 360
+    },
+    "wallMs": 2152.624831000023,
+    "frames": 19999,
+    "multiplier": 9.290518120944126,
+    "hud": "Reach the first checkpoint! (0/3) Checkpoints have a yellow banner. All checkpoints must be collected before reaching the finish line. Loading replay100% 0/3 0km/h Record --- Current 00:19.999 Differe",
+    "mainNowCheck": {
+      "mainClockDeltaAfter60Ticks": 1000,
+      "dateNowAdvances": true
+    },
+    "vsBaseline": {
+      "equal": true,
+      "compared": 5999
+    },
+    "trajectoryHeadTail": [
+      [
+        1,
+        318.6499938964844,
+        55.3499870300293,
+        20,
+        0.03535199910402298,
+        0,
+        1,
+        null
+      ],
+      [
+        1000,
+        309.0018310546875,
+        55.34617614746094,
+        20,
+        68.27153778076172,
+        0,
+        1,
+        null
+      ],
+      [
+        19999,
+        246.55673217773438,
+        55.448543548583984,
+        -3.94973087310791,
+        0.1049862951040268,
+        0,
+        1,
+        null
+      ]
+    ]
+  }
+]

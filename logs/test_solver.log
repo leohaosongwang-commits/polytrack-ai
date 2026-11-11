@@ -1,0 +1,22 @@
+TAP version 13
+# Subtest: 小蛇形赛道:冲线 + Verify 通过 + 基线(一直按 W)不能冲线或更慢
+ok 1 - 小蛇形赛道:冲线 + Verify 通过 + 基线(一直按 W)不能冲线或更慢
+  ---
+  duration_ms: 44651.002479
+  type: 'test'
+  ...
+# Subtest: 同种子同参数可复现:两次运行得到逐字节相同的回放串
+ok 2 - 同种子同参数可复现:两次运行得到逐字节相同的回放串
+  ---
+  duration_ms: 124087.167681
+  type: 'test'
+  ...
+1..2
+# tests 2
+# suites 0
+# pass 2
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 169079.363419
