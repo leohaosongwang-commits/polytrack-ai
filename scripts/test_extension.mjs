@@ -3,7 +3,7 @@
 // 用法:node scripts/test_extension.mjs [--track scripts/data/slalom.txt | --game-track summer3] [--plan out/mac_slalom.json] [--headed] [--shots 目录 [--shot-every 4]] [--timeout 600] [--no-click]
 //   --track  用我们自己的赛道替换官方默认赛道(只在内存里替换);不给则用官方 Summer 1
 //   --plan   把这份结果 JSON 预先放进缓存(跳过求解,直接测自动驾驶);不给则点击后在页面里求解
-// 为了不向游戏服务器发任何东西:测试里对 vps.kodub.com 的全部请求一律 abort,并统计"写入类请求"是否被页面内拦截(应为 0 次真正发出)。
+// 为了不向游戏服务器发任何东西:测试里对 vps.kodub.com 的全部请求一律 abort,并统计页面**尝试**发出的写入类请求(扩展本身不拦截网络,所以游戏自己的成绩上传会被尝试,但全部被这里的 route.abort() 拦下,没有一个真的到达服务器)。
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -77,7 +77,7 @@ let keyOk = 0, keyBad = 0, keyUsed = new Set(), badEx = [];
 if (kd.toggles) for (const [f, ctl] of kd.log) { if ([-2, -1, 0, 1].some((d) => pm(kd.toggles, f + d) === ctl)) keyOk++; else { keyBad++; if (badEx.length < 5) badEx.push([f, ctl, pm(kd.toggles, f)]); } keyUsed.add(ctl); }
 const kp = await ui(() => { const r = window.__ptai.ui.root; return { keyCaps: ['up', 'right', 'down', 'left'].map((k) => r.getElementById('k_' + k) ? 1 : 0).join(''), boxHidden: !r.getElementById('keys').classList.contains('on') }; });
 console.log('按键显示:循环采样', kd.log.length, '次,与方案一致', keyOk, '不一致', keyBad, '出现过的按键组合', [...keyUsed].sort((x, y) => x - y).join(','), '键帽元素', kp.keyCaps, '结束后已隐藏', kp.boxHidden, badEx.length ? JSON.stringify(badEx) : '');
-console.log(JSON.stringify({ outcome, pageErrors: errors.slice(0, 3), vpsWriteRequestsThatReachedNetwork: vpsWrites, vpsSeen: vpsSeen.slice(0, 6) }));
+console.log(JSON.stringify({ outcome, pageErrors: errors.slice(0, 3), vpsWriteRequestsAttemptedAllAborted: vpsWrites, vpsSeen: vpsSeen.slice(0, 6) }));
 await new Promise((r2) => setTimeout(r2, Number(a.hold ?? 3) * 1000));
 await browser.close();
 process.exit(/^完成/.test(outcome) && !/第二次: (?!完成)/.test(outcome) ? 0 : 1);

@@ -27,3 +27,12 @@ test('探索模式:小蛇形赛道找到冲线路线 + Verify 通过', { timeout
   assert.ok(r.finishFrames > 0 && r.finishFrames < 30000, `finish=${r.finishFrames}`);
   assert.equal(r.verifyOk, true);
 });
+
+test('压圈速:探索出的一圈当参考轨迹,重新规划后更快 + Verify 通过', { timeout: 900000 }, async () => {
+  const r = await solveTrack({ ...cfg, workers: 4, seed: 1, polishIters: 6, explore: { seconds: 500, pop: 96, H: 24, seg: 60 }, refine: 1 });
+  const first = r.phaseA.finishFrames;
+  assert.ok(first > 0 && r.finishFrames > 0, `first=${first} final=${r.finishFrames}`);
+  assert.ok(r.finishFrames < first, `压圈速后应该比探索的第一圈快:${first} -> ${r.finishFrames}`);
+  assert.equal(r.verifyOk, true);
+  assert.ok(Array.isArray(r.refine) && r.refine.length >= 1);
+});
