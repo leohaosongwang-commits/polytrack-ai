@@ -20,3 +20,10 @@ test('同种子同参数可复现:两次运行得到逐字节相同的回放串'
   assert.equal(a.recording, b.recording);
   assert.equal(a.finishFrames, b.finishFrames);
 });
+
+// Go-Explore 式探索(不依赖势场当"可行"信号):小蛇形赛道上找到一条冲线路线,打磨后游戏 Verify 通过。约 2~4 分钟。
+test('探索模式:小蛇形赛道找到冲线路线 + Verify 通过', { timeout: 900000 }, async () => {
+  const r = await solveTrack({ ...cfg, workers: 4, seed: 1, polishIters: 6, explore: { seconds: 500, pop: 96, H: 24, seg: 60 } });
+  assert.ok(r.finishFrames > 0 && r.finishFrames < 30000, `finish=${r.finishFrames}`);
+  assert.equal(r.verifyOk, true);
+});

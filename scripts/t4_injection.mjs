@@ -1,10 +1,11 @@
 // 任务 4:精确到帧的按键注入。
 // 检查:(1) 游戏实际记录到的按键翻转帧 == 我们下发的帧(逐帧完全一致);(2) 不同虚拟时钟步长下结果一致、可复现;
 //       (3) 压力脚本:1 帧点按、连续两帧换键、同一帧多键、~200 次随机翻转;(4) 游戏非实时回放路径与实时路径逐帧一致。
+import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
 import { runOne, expectedTogglesGame } from './lib/pt_runner.mjs';
 import { S1, S2, E1, randomScript } from './lib/fixtures.mjs';
-const OUT = new URL('../logs/', import.meta.url).pathname;
+const OUT = fileURLToPath(new URL('../logs/', import.meta.url));
 const scripts = { S1: [S1, 30000], S2: [S2, 30000], E1_edge: [E1, 6000], R1: [randomScript(1), 6000], R2: [randomScript(2), 6000], R3: [randomScript(3), 6000] };
 const cfgs = process.env.QUICK === '1' ? ['fast_step100', 'frame_by_frame'] : ['fast_step100', 'frame_by_frame', 'render_60hz', 'odd_step_7_3'];
 const all = {}; let okAll = true;

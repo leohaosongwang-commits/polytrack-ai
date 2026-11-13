@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "PolyTrack AI 自动驾驶(0.6.3,个人研究)",
+  "version": "0.2.0",
+  "description": "在 PolyTrack 0.6.3 页面里加一个面板:一键求解并自动驾驶。仅本地研究用;不介入游戏的网络请求。",
+  "minimum_chrome_version": "111",
+  "content_scripts": [
+    {
+      "matches": ["https://app-polytrack.kodub.com/0.6.3/*"],
+      "js": ["autopilot.js"],
+      "run_at": "document_start",
+      "world": "MAIN",
+      "all_frames": false
+    }
+  ]
+}

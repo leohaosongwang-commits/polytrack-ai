@@ -1,9 +1,10 @@
 // 任务 3 补充:专门挖"重生(R 键)相关的不一致"。多种重生节奏 x 多个虚拟时钟配置:
 //  比较 完成帧 / 逐帧轨迹哈希 / 回放路径一致 / Verify 严格性(±1 帧)。记录游戏实际写进回放的 reset 翻转帧。
+import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
 import { runOne } from './lib/pt_runner.mjs';
 import { RS1, RS2, RS3 } from './lib/fixtures.mjs';
-const OUT = new URL('../logs/', import.meta.url).pathname;
+const OUT = fileURLToPath(new URL('../logs/', import.meta.url));
 const scripts = { RS1_连续点按: RS1, RS2_长按与改油门: RS2, RS3_整局重来后再重生: RS3 };
 const cfgs = ['fast_step100', 'frame_by_frame', 'odd_step_7_3', 'render_60hz'];
 const out = {}; let ok = true;

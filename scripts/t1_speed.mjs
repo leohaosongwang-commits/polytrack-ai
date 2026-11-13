@@ -2,10 +2,11 @@
 // 比较:(A) 未打补丁的真实时间基线;(B) 物理 Worker 虚拟时钟 + 主线程真实渲染(不同步长);
 //       (C) Worker 与主线程都用虚拟时钟(不渲染)。
 // 判据:加速倍数 >> 1,且"按住 W"期间(含撞墙)的逐帧轨迹与真实时间基线逐比特一致。
+import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
 import { launchGame, sleep } from './lib/pt_harness.mjs';
 
-const OUT = new URL('../logs/', import.meta.url).pathname;
+const OUT = fileURLToPath(new URL('../logs/', import.meta.url));
 const SIM_MS = Number(process.env.SIM_MS ?? 20000);
 const results = [];
 

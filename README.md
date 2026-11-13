@@ -10,6 +10,20 @@
 > TAS/机器人成绩能否提交到官方排行榜取决于社区与开发者的规则,**我没有查证到官方明文规定**(speedrun.com 对我的网络 403)。
 > 提交之前请先去官方 Discord / itch.io 论坛确认,不要擅自提交。
 
+## 在正版页面里用:Chrome 扩展(面板 + 一键自动驾驶)
+
+`extension/` 是一个 Chrome 扩展(MV3,Chrome ≥ 111),只在 `https://app-polytrack.kodub.com/0.6.3/` 生效:页面右上角出现面板,点 **▶ 一键自动驾驶** → 没有这条赛道的方案就先在页面里求解(几分钟),再回到起点按方案自动开。
+安装、面板说明、已知限制见 [`extension/README.md`](extension/README.md)。扩展**不碰网络**:不包装 XHR / fetch / sendBeacon,也没有 `declarativeNetRequest` 规则,成绩提交与排行榜读取完全交回游戏页面。
+
+```bash
+node scripts/build_extension.mjs                                                           # 构建 extension/autopilot.js
+node scripts/test_extension.mjs --track scripts/data/slalom.txt --plan out/mac_slalom_field.json --twice   # 用缓存方案连开两次(第二次先按 T)
+node scripts/test_extension.mjs --track scripts/data/slalom.txt                            # 页面内求解 + 自动驾驶
+node scripts/play_replay.mjs --track scripts/data/slalom.txt --result out/mac_slalom_field.json --pace 1  # 有窗口地按 1 倍速放一份结果
+```
+
+本机(macOS)跑脚本:没有 Playwright 自带 Chromium 时用 `PT_CHROME=1`(用本机 Google Chrome),想看窗口加 `PT_HEADED=1`。
+
 ## 快速开始
 
 需要 Node 18+、`playwright`(自带 Chromium)、能访问 `app-polytrack.kodub.com` 的网络。
@@ -36,7 +50,7 @@ node --test test/solver.test.mjs      # 端到端(几分钟)
 ```
 
 `solve.mjs` 常用参数:`--segs 40x6,100x6,240x4`(规划时域,"帧数 x 个数"),`--pop 96 --iters 3`(CEM 种群/迭代),
-`--commit 6`(每轮提交几个动作),`--seconds N` 或 `--polish-iters N`(打磨预算;后者可复现),`--seed`,`--resume 旧.json`(跳过规划只打磨),`--trace`,`--official`(用游戏默认赛道,即 Summer 1),`--potential polyline|field`,`--half-width / --off-penalty`(离路面惩罚)。规划阶段若 4000 帧内进度增长不足 4 m 会快速失败并写出 `.failed.json` 现场。
+`--commit 6`(每轮提交几个动作),`--seconds N` 或 `--polish-iters N`(打磨预算;后者可复现),`--seed`,`--resume 旧.json`(跳过规划只打磨),`--trace`,`--official`(用游戏默认赛道,即 Summer 1),`--potential polyline|field`,`--half-width / --off-penalty`(离路面惩罚)。规划阶段若 4000 帧内进度增长不足 4 m 会快速失败并写出 `.failed.json` 现场。 另有 `scripts/lib/explorer.mjs`(`solve.mjs --explore [--explore-seconds 600 --explore-resume 上次的.frontier.json]`:档案 + 随机展开找任意一条冲线路线,再打磨)、`scripts/bench.mjs`(批量跑赛道 / 种子并汇总)、`scripts/diag_fail.mjs`(重放失败现场、列出停滞点附近的零件)、`scripts/make_local_plan.mjs`(把一条回放串验证后做成本地方案)、`scripts/tas_polish.mjs`(帧级局部搜索,直接以完成帧为目标),以及 `--actions W,WL,WR,S,SL,SR`(扩展动作集)、`--crash-stop 窗口帧,掉速km/h,最低速km/h`(默认开 50,25,60;候选一撞就在引擎里提前结束,`--no-crash-stop` 关)、`--carry-mass`(默认 0.8)、`--game-track summer3`(官方赛道,内存里转手)和 `scripts/refine.mjs`(沿已有方案分段择优 / 束搜索:`--src 结果.json --out 前缀 --n 8 --beam 2 --cuts ...`)。
 
 ## 原理
 
@@ -53,18 +67,28 @@ node --test test/solver.test.mjs      # 端到端(几分钟)
 
 ## 当前局限(诚实清单)
 
-* 进度势能有两种:`--potential polyline`(默认,假设单主路的 BFS 中线,自制赛道用)和 `--potential field`(按检查点分段的 Dijkstra 距离场,支持多层 / 跳跃 / 检查点折返,官方赛道用:`--official`)。官方 Summer 1 的势能已经能建出来,但**搜索在检查点 2 之前停滞,没有完成一圈**(详见 `report/phase0.md` 6.4)。
-* 搜索质量没有和"真实最优"对比过。当前最好结果(`out/slalom_v3.*`,1.1 km 蛇形赛道 16.835 s,Verify 通过)里**仍有一次撞击**(≈13 s 处速度从 ≈340 骤降到 ≈170 km/h),按键时间线抖动也很多(见 HTML 报告)。我试过加"速度骤降"惩罚(`--crash`,默认关)和拉长远端时域,都没有改善(分别 17.161 s、20.534 s),详见 `report/phase0.md` 6.2。基线(一直按 W)在这条赛道上不能冲线。
+* 进度势能有两种:`--potential polyline`(单主路 BFS 中线)和 `--potential field`(按检查点分段的 Dijkstra 距离场,支持多层 / 跳跃 / 检查点折返;**CLI 和扩展现在默认用它**)。在自制蛇形赛道上 field 明显更好(见下)。
+* **官方 Summer 1 现在能跑完整圈**(详见 `report/phase0.md` 6.6 / 6.7):势能原先有三处错误(向上跳跃边过宽、把叠起来的实心方块当路面、没有表示"坡道起跳的大跳"),都已修;停滞后回退得不够远是另一个原因。目前最好 **26.961 s**(游戏 Verify 通过,已内置进扩展;靠 `scripts/refine.mjs` 分段择优);冷跑一次 31.520 s。**不是最优**:榜单第 1 名 22.123 s,差别在线路与手法(骑坡道、漂移、空中刹车),求解器自己发现不了,详见 `report/phase0.md` 6.8。
+* **求解器方差很大**:slalom 同参数同种子,不同版本得到 15.606 / 17.402 / 21.180 s;15.604 s 不是最优,也没有最优性证明。曾出现过约 1.1 s、两圈的撞后翻滚(18.225 s 那次),现在翻滚会被扣分,但不是根治。
+* slalom 的撞墙已经消失:用 field 势能的结果(`out/mac_slalom_field.*`,15.604 s,Verify 通过)速度曲线上没有任何 60 帧内降速 > 25 km/h 的点。之前 polyline 结果(16.835 s)的撞击发生在最后一个 S 弯入口:车速 336 km/h 撞墙(规划时域只有 1.8 s,看不到弯)。**这是一次实测对比,不是根治**:没有换种子、没有换赛道验证,高速入弯没有结构化的速度上限。
+* 搜索质量没有和"真实最优"对比过(粗估直线理想值 ≈13.7 s)。按键时间线抖动仍然很多。
 * 动作集只有 W / W+左 / W+右 / 刹车;没用 R(检查点重生)。重生在阶段 0 的压力测试里行为一致,但搜索器没利用它。
-* 速度:单次整圈评估 ≈ 50~120 ms(单 Worker,约 15 万帧/秒);4 核上规划 1.1 km 赛道约 2~3 分钟。
-* 只在本机离线运行,版本固定 0.6.3(Worker 补丁依赖压缩后的代码布局,锚点变了会直接报错)。
+* 速度:单次整圈评估 ≈ 50~120 ms(单 Worker);规划时间 97% 是物理模拟,4 线程约 38 万帧/s。slalom 规划约 1.5 分钟(4 线程,撞击提前结束后少约 40% 模拟帧,`report/phase0.md` 6.10)。
+* **新赛道不保证能算出来**:滚动时域规划器在官方 summer2、summer3 上都失败(都含近乎垂直的墙 / 环形曲面结构,渲染截图确认,格子势场表达不了;见 `report/phase0.md` 6.11)。**`solve.mjs --explore`(Go-Explore 式探索,6.13)解出了 summer3**(27.205 s,游戏 Verify 通过,147 s),summer2 冲过了墙和长跳但没冲线;扩展页面内求解在规划器停滞后会自动改用探索,summer4~7 / winter / desert 没测。能跑通的只有 slalom 和 Summer 1。
+* 版本固定 0.6.3(Worker 补丁依赖压缩后的代码布局,锚点变了会直接报错)。扩展只匹配 0.6.3 页面。
+* 扩展下:面板上的自动驾驶按 1 倍实时;求解时页面会明显变卡;扩展不改动游戏的任何网络请求(成绩上传由你自行决定)。
 
 ## 目录
 
 ```
 scripts/
   solve.mjs                CLI:规划 + 打磨 + Verify 校验,输出回放串 / JSON
+  bench.mjs                批量基准:多赛道 / 多种子依次跑 solve.mjs,汇总成表
+  diag_fail.mjs            重放 *.failed.json,打印轨迹表和停滞点附近的赛道零件
   render_html.mjs          把结果渲染成单文件 HTML 报告
+  play_replay.mjs          在真实游戏页面(有窗口)里按 1 倍速放一份结果
+  build_extension.mjs      把页面内自动驾驶拼成 extension/autopilot.js
+  test_extension.mjs       用本机 Chrome 端到端测试页面内求解 + 自动驾驶
   verify_result.mjs        用游戏自带 Verify 独立复核一份结果 JSON
   make_slalom.mjs          生成蛇形测试赛道(S 弯部件 41/42 + 直路)
   build_mini_track.mjs     阶段 0 用的直线赛道
@@ -78,7 +102,8 @@ scripts/
   lib/pt_driver.mjs, pt_runner.mjs, fixtures.mjs   阶段 0 的帧精确注入与对比
   t1_speed / t1b_* / t2_state / t3_determinism / t3b_respawn / t4_injection / run_all   阶段 0 实验
   data/                    我们自己生成的测试赛道导出串
-test/                      unit / engine / solver 测试
+extension/                 Chrome 扩展(manifest / 页面内核心 src/core.js / 构建产物 autopilot.js)
+test/                      unit / engine / solver / extension_build 测试
 logs/                      阶段 0 的原始日志
 report/                    阶段 0 报告 + 内部机制附录
 out/                       求解结果(回放串 / JSON / HTML)

@@ -1,9 +1,10 @@
 // 任务 2:读取车辆状态,并与游戏界面(HUD)交叉核对。
 // 方法:旁路观察物理 Worker 回传的状态缓冲区(位置/姿态/速度/检查点/完成帧数),每秒虚拟时间采样一次,
 //       同时读取界面 DOM 文本(计时器、车速、检查点计数),核对两者一致。DOM 文本本身也是 OCR 之外的备用读取通道。
+import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
 import { launchGame, sleep } from './lib/pt_harness.mjs';
-const OUT = new URL('../logs/', import.meta.url).pathname;
+const OUT = fileURLToPath(new URL('../logs/', import.meta.url));
 const custom = fs.readFileSync(new URL('./data/mini_track.txt', import.meta.url), 'utf8').trim();
 
 const g = await launchGame({ customTrack: custom, keepAll: true });

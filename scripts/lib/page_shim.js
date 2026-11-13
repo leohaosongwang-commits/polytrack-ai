@@ -32,10 +32,10 @@
     if (fl & 2) { finishFrames = u8[i] | (u8[i + 1] << 8) | (u8[i + 2] << 16); i += 3; }
     const cp = dv.getUint16(i, true); i += 2;
     const px = dv.getFloat32(i, true), py = dv.getFloat32(i + 4, true), pz = dv.getFloat32(i + 8, true); i += 12;
-    i += 16; const nImp = u8[i]; i += 1 + 4 * nImp;
+    const qx = dv.getFloat32(i, true), qy = dv.getFloat32(i + 4, true), qz = dv.getFloat32(i + 8, true), qw = dv.getFloat32(i + 12, true); i += 16; const nImp = u8[i]; i += 1 + 4 * nImp;
     for (let w = 0; w < 4; w++) if (fl & (8 << w)) i += 24;
     i += 16 * 4 + 4; const cb = u8[i];
-    return { carId, frames, speedKmh, started: !!(fl & 1), finishFrames, cp, respawnable: !!(fl & 4), x: px, y: py, z: pz, ctl: cb & 31 };
+    return { carId, frames, speedKmh, started: !!(fl & 1), finishFrames, cp, respawnable: !!(fl & 4), x: px, y: py, z: pz, ctl: cb & 31, wheels: ((fl >> 3) & 1) + ((fl >> 4) & 1) + ((fl >> 5) & 1) + ((fl >> 6) & 1), qx, qy, qz, qw };
   }
   function hashInto(h, u8) { // 两条 32 位 FNV 变体拼成 64 位摘要
     let a = h[0], b = h[1];
@@ -52,7 +52,7 @@
   const OW = window.Worker;
   window.Worker = class extends OW {
     constructor(url, opts) {
-      super(url, opts);
+      super(PT.mapUrl ? PT.mapUrl(url) : url, opts); // 扩展里 mapUrl 把物理 Worker 换成"打过补丁的 blob";harness 里由路由处理,mapUrl 不存在
       if (!String(url).includes('simulation_worker')) return;
       const meta = { idx: PT.workers.length, init: null, creates: [], ctl: [], cars: {}, msgsIn: 0, realtime: null };
       PT.workers.push(this); PT.meta.push(meta);
@@ -80,7 +80,7 @@
             if (prev && s.cp > prev.cp) c.cpEvents.push({ frames: s.frames, cp: s.cp });
             if (prev && !(prev.ctl & 16) && (s.ctl & 16)) c.resetFrames.push(s.frames);
             if (s.finishFrames !== null && c.finishSeenAt === null) c.finishSeenAt = s.frames;
-            if (cfg.keepAll) (c.all ??= []).push([s.frames, s.x, s.y, s.z, s.speedKmh, s.cp, s.ctl, s.finishFrames]);
+            if (cfg.keepAll) (c.all ??= []).push([s.frames, s.x, s.y, s.z, s.speedKmh, s.cp, s.ctl, s.finishFrames, s.wheels, s.qx, s.qy, s.qz, s.qw]);
             if (cfg.keepRecording && s.started && (!prev || prev.finishFrames === null)) (c.rec ??= []).push([prev ? prev.frames : 0, s.ctl]);
           }
         }
@@ -99,7 +99,7 @@
     return out;
   };
   PT.cur = (widx) => { const m = PT.meta[widx]; return m.creates.length ? m.creates[m.creates.length - 1].carId : null; }; // 最新创建的车(整局重来会新建车)
-  PT.peek = (widx) => { const c = PT.meta[widx].cars[PT.cur(widx)]; return c && c.last ? { frames: c.last.frames, fin: c.last.finishFrames, cp: c.last.cp, started: c.last.started } : null; };
+  PT.peek = (widx) => { const c = PT.meta[widx].cars[PT.cur(widx)]; return c && c.last ? { frames: c.last.frames, fin: c.last.finishFrames, cp: c.last.cp, started: c.last.started, ctl: c.last.ctl } : null; }; // ctl = 物理侧实际收到的按键位(1 上/W,2 右/D,4 下/S,8 左/A,16 重置)
   PT.getCar = (widx) => { const c = PT.meta[widx].cars[PT.cur(widx)]; return c ? { ...c, hash: hex(c.hash) } : null; };
   PT.resetCarStats = (widx) => { PT.meta[widx].cars = {}; PT.meta[widx].ctl = []; };
 
@@ -110,6 +110,7 @@
     const src = PT.meta[srcIdx];
     const w = new Worker('simulation_worker.bundle.js');
     const wi = PT.workers.indexOf(w);
+    if (PT.meta[wi]) PT.meta[wi].ours = true; // 我们自己建的评估/校验 Worker(扩展里的时钟推进器不要去推它们)
     const done = new Promise((resolve) => {
       w.addEventListener('message', (ev) => { const d = ev.data; if (d && (d.messageType === 8 || d.messageType === 9)) resolve(d); });
       w.addEventListener('error', (ev) => resolve({ result: null, error: String(ev.message || 'worker error') })); // 例如回放反序列化失败
@@ -168,7 +169,9 @@
     for (let k = 0; k < n; k++) {
       const part = plans.slice(k * per, (k + 1) * per); if (!part.length) continue;
       const id = PT.nextId++; const p = new Promise((resolve) => PT.waiters.set(id, resolve));
-      PT.pool[k].w.postMessage({ messageType: 100, id, plans: part, carIdBase: PT.carSeq, ...opts });
+      // gate.shifts 是逐计划的数组:每个 Worker 只拿到自己那一段
+      const o = opts && opts.gate && opts.gate.shifts ? { ...opts, gate: { ...opts.gate, shifts: opts.gate.shifts.slice(k * per, (k + 1) * per) } } : opts;
+      PT.pool[k].w.postMessage({ messageType: 100, id, plans: part, carIdBase: PT.carSeq, ...o });
       PT.carSeq += part.length; jobs.push(p);
     }
     const res = await Promise.all(jobs); return res.flatMap((r) => r.results);

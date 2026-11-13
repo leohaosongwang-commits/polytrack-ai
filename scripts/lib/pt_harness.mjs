@@ -45,8 +45,13 @@ function addEvalEngine(src) {
   return src.replace(a, EVAL_CASES + a);
 }
 
-export async function launchGame({ viewport = { width: 640, height: 360 }, mainVirtual = false, sampleEvery = 0, keepAll = false, keepRecording = true, patchWorker = true, quiet = true, exposeTrack = false, customTrack = null } = {}) {
-  const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
+export async function launchGame({ viewport = { width: 640, height: 360 }, mainVirtual = false, sampleEvery = 0, keepAll = false, keepRecording = true, patchWorker = true, quiet = true, exposeTrack = false, customTrack = null, officialTrack = null } = {}) {
+  // PT_CHROME=1:用本机已安装的 Google Chrome(无需 Playwright 自带 Chromium);PT_HEADED=1:显示窗口
+  const browser = await chromium.launch({
+    ...(process.env.PT_CHROME ? { channel: 'chrome' } : {}),
+    ...(process.env.PT_HEADED ? { headless: false } : {}),
+    args: ['--autoplay-policy=no-user-gesture-required'],
+  });
   const context = await browser.newContext({ viewport });
   const page = await context.newPage();
   const errors = [];
@@ -58,6 +63,8 @@ export async function launchGame({ viewport = { width: 640, height: 360 }, mainV
     if (!url.startsWith(GAME_BASE)) return route.abort();
     // 可选:用我们自己生成的赛道导出串替换首次自动加载的官方赛道文件(仅内存中,不落盘游戏数据)
     if (customTrack && url.split('?')[0].endsWith('tracks/official/summer1.track')) return route.fulfill({ status: 200, contentType: 'text/plain', body: customTrack });
+    // 可选:把默认载入的 summer1 换成另一条官方赛道(summer2 / winter3 / desert4 …)。赛道文件由游戏自己的静态资源路径取得,只在内存里转手,不落盘。
+    if (officialTrack && url.split('?')[0].endsWith('tracks/official/summer1.track')) return route.fulfill({ response: await route.fetch({ url: GAME_BASE + 'tracks/official/' + officialTrack + '.track' }) });
     if (patchWorker && url.split('?')[0].endsWith('simulation_worker.bundle.js')) {
       return route.fulfill({ status: 200, contentType: 'application/javascript', body: WORKER_SHIM + '\n' + addEvalEngine(exposeTrack ? exposeInternals(fetchWorkerSource()) : fetchWorkerSource()) });
     }
@@ -90,6 +97,13 @@ class Game {
     const t = performance.now();
     await this.page.evaluate(([i, ms, step]) => window.__pt.advance(i, ms, step), [this.rt, ms, step]);
     return { wallMs: performance.now() - t };
+  }
+  /** 页面内逐帧(1ms 步长)推进,直到 frames >= F、完成、或已推进 maxN 帧;返回实际推进的帧数(平滑播放用,省 CDP 往返) */
+  async advanceTo(F, maxN = 1000) {
+    return this.page.evaluate(async ([i, F, m]) => {
+      const P = window.__pt; let n = 0;
+      for (;;) { const p = P.peek(i); if (!p || p.fin !== null || p.frames >= F || n >= m) return n; await P.advance(i, 1, 1); n++; }
+    }, [this.rt, F, maxN]);
   }
   async mainTick(n, dtMs = 1000 / 60) { return this.page.evaluate(([n, d]) => window.__pt.mainTick(n, d), [n, dtMs]); }
   async car() { return this.page.evaluate((i) => window.__pt.getCar(i), this.rt); }

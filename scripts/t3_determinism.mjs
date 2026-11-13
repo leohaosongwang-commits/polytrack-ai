@@ -1,10 +1,11 @@
 // 任务 3:确定性测试。同一串输入,多次运行 + 不同"加速档位"(虚拟时钟步长/是否渲染/是否限速到 1x),比较完成时间和逐帧轨迹哈希。
 // 另外:(a) 每次运行都用"游戏自己的非实时回放路径"重放并逐帧比对;(b) 用游戏自带 Verify 验证完成帧(含 +-1 帧负对照);
 //       (c) 对照组:不打补丁的真实时间运行 + 墙钟时间注入按键,展示为什么必须接管时钟。
+import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
 import { runOne, runRealtimeContrast, CONFIGS } from './lib/pt_runner.mjs';
 import { S1, S2, S3 } from './lib/fixtures.mjs';
-const OUT = new URL('../logs/', import.meta.url).pathname;
+const OUT = fileURLToPath(new URL('../logs/', import.meta.url));
 const plan = (process.env.QUICK === '1')
   ? ['fast_step100', 'frame_by_frame']
   : ['fast_step100', 'fast_step100', 'fast_step100', 'render_60hz', 'frame_by_frame', 'odd_step_7_3', 'realtime_1x'];

@@ -1,5 +1,6 @@
 // 把一次求解结果渲染成单文件 HTML 报告(俯视轨迹按车速着色、速度曲线、按键时间线、回放串)。
 // 用法:node scripts/render_html.mjs --track scripts/data/slalom.txt --result out/slalom.json --out out/slalom.html
+import { pathToFileURL } from 'node:url';
 import fs from 'node:fs';
 import { launchGame } from './lib/pt_harness.mjs';
 import { togglesToMasks } from './lib/solver.mjs';
@@ -70,7 +71,7 @@ rows.forEach(([bit,l,c],r)=>{k+='<text x="2" y="'+(14+r*16)+'" font-size="10" fi
 $('keys').innerHTML=k;$('rec').value=D.recording;$('cp').onclick=()=>{navigator.clipboard?.writeText(D.recording);$('cp').textContent='已复制'};
 </script></body></html>`;
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const a = args(process.argv.slice(2));
   console.log(await renderHtml({ trackFile: a.track, resultFile: a.result, outFile: a.out }));
 }

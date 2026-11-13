@@ -1,3 +1,6 @@
 node_modules/
 *.log.tmp
 .DS_Store
+
+# Chrome 加载未打包扩展时自动生成的索引规则集
+extension/_metadata/

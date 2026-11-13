@@ -28,13 +28,13 @@ export async function waitStarted(g, tries = 400) {
  * opts.pace    >0 时按"虚拟速度 = pace 倍实时"限速(用来测 1x 速度);0 = 全速
  * opts.endFrame 推进到该帧(或完成)为止
  */
-export async function runScript(g, events, { step = 1000 / 60, pace = 0, endFrame = 20000, margin = 40, log = null } = {}) {
+export async function runScript(g, events, { step = 1000 / 60, pace = 0, endFrame = 20000, margin = 40, chunk = Infinity, log = null } = {}) {
   const evs = [...events].sort((a, b) => (a.run ?? 0) - (b.run ?? 0) || a.frame - b.frame);
   const t0 = performance.now(); let virt = 0;
-  const adv = async (ms, st) => {
-    await g.advance(ms, st); virt += ms;
-    if (pace > 0) { const due = t0 + virt / pace; const w = due - performance.now(); if (w > 0) await sleep(w); }
-  };
+  const pacing = async () => { if (pace > 0) { const due = t0 + virt / pace; const w = due - performance.now(); if (w > 0) await sleep(w); } };
+  const adv = async (ms, st) => { await g.advance(ms, st); virt += ms; await pacing(); };
+  // 逐帧(1ms 单步)推进到帧 F,但循环在页面内完成(省掉每帧一次 CDP 往返);只在有限 chunk 的"平滑播放"模式里用
+  const advFine = async (F, maxN) => { virt += await g.advanceTo(F, maxN); await pacing(); };
   const frames = async () => { const p = await g.peek(); return p ? { f: p.frames, fin: p.fin } : { f: 0, fin: null }; };
   let started = false;
   const reach = async (F) => { // 把物理推进到恰好 frames == F(或完成)
@@ -42,7 +42,9 @@ export async function runScript(g, events, { step = 1000 / 60, pace = 0, endFram
       const { f, fin } = await frames();
       if (fin !== null || f >= F) return;
       const rem = F - f;
-      if (rem > margin + 8 && step > 1) await adv(rem - margin, step); else await adv(1, 1);
+      if (rem > margin + 8 && step > 1) await adv(Math.min(rem - margin, chunk), step);
+      else if (Number.isFinite(chunk)) await advFine(F, Math.min(rem, chunk));
+      else await adv(1, 1);
     }
   };
   let curRun = 0; let runsSeen = await g.runsCount();
@@ -74,7 +76,7 @@ export async function runScript(g, events, { step = 1000 / 60, pace = 0, endFram
   for (;;) {
     const { f, fin } = await frames();
     if (fin !== null || f >= endFrame) break;
-    await adv(Math.min(500, endFrame - f), step);
+    await adv(Math.min(500, chunk, endFrame - f), step);
     if (g.mainVirtual) await g.mainTick(1, 1000 / 60);
   }
   const wallMs = performance.now() - t0;
