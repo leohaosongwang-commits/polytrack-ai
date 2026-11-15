@@ -53,6 +53,12 @@ test('构建产物里没有游戏代码特征(Worker 脚本只在运行时取、
   assert.ok(js.length < 400 * 1024);
 });
 
+test('占位符都已替换;本机方案通道存在(local.json 被 .gitignore,公开构建里是空表)', () => {
+  assert.ok(!js.includes('__BUNDLED_PLANS__') && !js.includes('__LOCAL_PLANS__'));
+  assert.ok(js.includes('const LOCAL_SEED = '));
+  assert.match(fs.readFileSync(root + '.gitignore', 'utf8'), /extension\/plans\/local\.json/);
+});
+
 // 内置方案:每条都能解码、翻转帧不超过完成帧,并且已经内联进 autopilot.js
 import { decodeRecording } from '../scripts/lib/pt_codec.mjs';
 test('内置方案:回放串可解码、与完成帧一致,并已内联进构建产物', () => {

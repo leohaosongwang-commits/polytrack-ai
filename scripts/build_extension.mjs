@@ -17,7 +17,9 @@ const guideBundle = `window.__ptGuideMath = (() => {\n${strip(rd('scripts/lib/gu
 const core = rd('extension/src/core.js')
   .replace('__WORKER_SHIM__', () => JSON.stringify(rd('scripts/lib/worker_shim.js')))
   .replace('__EVAL_CASES__', () => JSON.stringify(EVAL_CASES))
-  .replace('__BUNDLED_PLANS__', () => JSON.stringify(JSON.parse(fs.existsSync(root + 'extension/plans/bundled.json') ? rd('extension/plans/bundled.json') : '{}')));
+  .replace('__BUNDLED_PLANS__', () => JSON.stringify(JSON.parse(fs.existsSync(root + 'extension/plans/bundled.json') ? rd('extension/plans/bundled.json') : '{}')))
+  // 本机方案(extension/plans/local.json,被 .gitignore):--public 时不内联,公开构建 / 推送用它
+  .replace('__LOCAL_PLANS__', () => JSON.stringify(!process.argv.includes('--public') && fs.existsSync(root + 'extension/plans/local.json') ? JSON.parse(rd('extension/plans/local.json')) : {}));
 
 const out = `// ==UserScript==
 // @name         PolyTrack AI 自动驾驶(0.6.3,个人研究)

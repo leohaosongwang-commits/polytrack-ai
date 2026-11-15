@@ -4,3 +4,6 @@ node_modules/
 
 # Chrome 加载未打包扩展时自动生成的索引规则集
 extension/_metadata/
+
+# 只在本机用的方案(榜单第 1 名回放打底等):不进仓库
+extension/plans/local.json

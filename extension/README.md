@@ -72,6 +72,11 @@ node scripts/bundle_plan.mjs --result out/xxx.json --name "赛道名" [--track �
 node scripts/build_extension.mjs
 ```
 
+
+### 只在本机用的方案(`extension/plans/local.json`)
+
+想在自己机器上用"榜单第 1 名回放打底"之类**不能公开**的方案:放进 `extension/plans/local.json`(`{赛道指纹: {name, finishFrames, toggles, recording, source}}`),这个文件被 `.gitignore`,**不进仓库**;`node scripts/build_extension.mjs` 会把它内联进你本机的 `autopilot.js`,面板显示「本地导入:<source>,已通过游戏 Verify」,与内置方案、浏览器缓存里取更快的那条。`node scripts/build_extension.mjs --public` 产出不含本机方案的公开构建(推送前必须用这个)。方案本身用 `scripts/make_local_plan.mjs --recording-file 回放串.txt --frames N --game-track summer3 --out plan.json` 生成,写入前会用游戏 Verify 校验。
+
 ## 重新构建
 
 ```bash

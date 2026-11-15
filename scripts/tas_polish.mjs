@@ -6,7 +6,7 @@
 //   所以在窗口之后 300~1500 帧处取原方案轨迹上的一个"闸门"(过该点、法向=该处速度方向的平面),
 //   候选越过闸门的那一刻起,后半段按键改按"越过时刻"对齐(并随机试 ±5 帧偏移)。这样早期的结构性改动(起飞速度、落点、漂移时机)也能被真实完成帧公平地评价。
 // 先做 1-opt 穷举扫描(每个键的每个翻转帧平移若干固定量、每个脉冲整体平移,带/不带闸门各评一遍),到局部最优后再做随机多点变异(--no-sweep / --no-random 可关)。
-// 用法:node scripts/tas_polish.mjs --src 方案.json --out 前缀 [--minutes 30] [--workers 4] [--batch 64] [--seed 1] [--from 0] [--late 0.25] [--no-gate] [--no-sweep] [--no-random]
+// 用法:node scripts/tas_polish.mjs --src 方案.json --out 前缀 [--minutes 30] [--workers 4] [--batch 64] [--seed 1] [--from 0] [--late 0.25] [--no-gate] [--no-sweep] [--no-random] [--game-track summer3|winter2|desert4…]
 //   方案.json 需含 toggles + finishFrames(solve.mjs / refine.mjs 的输出,或 make_local_plan 的 plan 字段)。
 //   想提前结束:在输出前缀旁建一个空文件 <前缀>.stop,会在当前一轮结束后收尾并校验。
 // 只在本地离线运行,不会向游戏服务器上传任何成绩(harness 拒绝所有非静态资源请求)。
@@ -121,10 +121,10 @@ export function rebuild(best, W, cand, tailArr, post, fc, sh, fin) {
   return out;
 }
 
-export async function tasPolish({ src, out, minutes = 30, workers = 4, batch = 64, seed = 1, from = 0, late = 0.25, rounds = 2, gate = true, sweep = true, structural = true, random = true, log = console.log }) {
+export async function tasPolish({ src, out, minutes = 30, workers = 4, batch = 64, seed = 1, from = 0, late = 0.25, rounds = 2, gate = true, sweep = true, structural = true, random = true, gameTrack = null, log = console.log }) {
   const j = JSON.parse(fs.readFileSync(src, 'utf8')); const j2 = j.plan ?? j;
   let best = Array.from(togglesToMasks(j2.toggles, j2.finishFrames)); let bestFin = j2.finishFrames; const fin0 = bestFin;
-  const rng = mulberry32(seed); const g = await launchGame({ exposeTrack: true, mainVirtual: true });
+  const rng = mulberry32(seed); const g = await launchGame({ exposeTrack: true, mainVirtual: true, ...(gameTrack ? { officialTrack: gameTrack } : {}) });
   try {
     await g.makePool(workers);
     const finishOf = async (m) => (await g.evalBatch([Array.from(m)], { seg: 1, tail: 1, maxFrames: m.length + 300 }))[0].fin;
@@ -235,7 +235,7 @@ export async function tasPolish({ src, out, minutes = 30, workers = 4, batch = 6
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const raw = process.argv.slice(2); const a = Object.fromEntries(raw.reduce((acc, v, i, arr) => (v.startsWith('--') && !v.startsWith('--no-') ? [...acc, [v.slice(2), arr[i + 1] && !arr[i + 1].startsWith('--') ? arr[i + 1] : true]] : acc), []));
   if (!a.src || !a.out) { console.error('用法: node scripts/tas_polish.mjs --src 方案.json --out 前缀 [--minutes 30] [--workers 4] [--batch 64] [--seed 1] [--from 0] [--late 0.25] [--no-gate] [--no-sweep] [--no-random]'); process.exit(2); }
-  const r = await tasPolish({ src: a.src, out: a.out, minutes: Number(a.minutes ?? 30), workers: Number(a.workers ?? 4), batch: Number(a.batch ?? 64), seed: Number(a.seed ?? 1), from: Number(a.from ?? 0), late: Number(a.late ?? 0.25), gate: !raw.includes('--no-gate'), sweep: !raw.includes('--no-sweep'), structural: !raw.includes('--no-structural'), random: !raw.includes('--no-random') });
+  const r = await tasPolish({ src: a.src, out: a.out, minutes: Number(a.minutes ?? 30), workers: Number(a.workers ?? 4), batch: Number(a.batch ?? 64), seed: Number(a.seed ?? 1), from: Number(a.from ?? 0), late: Number(a.late ?? 0.25), gate: !raw.includes('--no-gate'), sweep: !raw.includes('--no-sweep'), structural: !raw.includes('--no-structural'), random: !raw.includes('--no-random'), gameTrack: a['game-track'] && a['game-track'] !== true ? a['game-track'] : null });
   console.log(`\n结果: ${r.finishFrames} 帧 (${(r.finishFrames / 1000).toFixed(3)} s),起点 ${r.startFrames},Verify ${r.verifyOk ? '通过' : '失败'}`);
   process.exit(r.verifyOk ? 0 : 1);
 }

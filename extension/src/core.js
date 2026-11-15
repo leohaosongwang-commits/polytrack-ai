@@ -89,10 +89,14 @@
   const BUNDLED = __BUNDLED_PLANS__;
   const loadLocal = (id) => { try { return JSON.parse(localStorage.getItem(cacheKey(id)) || 'null'); } catch { return null; } };
   /** 本地缓存与内置方案里取更快的那个(都要求已通过 Verify;没有 verified 标记的本地方案也保留,但排在内置之后) */
+  // 只在本机用的方案(例如榜单第 1 名回放打底的):由 extension/plans/local.json 在本机构建时内联;该文件被 .gitignore,不进仓库,公开构建(--public)里是空的。
+  const LOCAL_SEED = __LOCAL_PLANS__;
   const loadPlan = (id) => {
-    const loc = loadLocal(id); const b = BUNDLED[id] ? { ...BUNDLED[id], verified: true, bundled: true } : null;
-    if (loc && b) return loc.verified && loc.finishFrames < b.finishFrames ? loc : b;
-    return b ?? loc;
+    const loc = loadLocal(id);
+    const b = BUNDLED[id] ? { ...BUNDLED[id], verified: true, bundled: true } : null;
+    const sd = LOCAL_SEED[id] ? { v: 1, ...LOCAL_SEED[id], verified: true } : null;
+    const best = [b, sd, loc && loc.verified ? loc : null].filter(Boolean).sort((x, y) => x.finishFrames - y.finishFrames)[0]; // 同帧数时内置优先(sort 稳定)
+    return best ?? loc;
   };
   const savePlan = (id, p) => { try { localStorage.setItem(cacheKey(id), JSON.stringify(p)); } catch { /* 无痕等场景下存不了:本次仍可用 */ } };
   const clearPlan = (id) => { try { localStorage.removeItem(cacheKey(id)); } catch { /* ignore */ } };

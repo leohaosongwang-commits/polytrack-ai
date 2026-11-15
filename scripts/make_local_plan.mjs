@@ -1,6 +1,6 @@
 // 把"一条回放串"做成扩展能读的本地方案(只用于本机:不进内置方案表、不进仓库),并用游戏自带 Verify 校验。
 // 典型用途:把排行榜回放(游戏的 Watch 功能取得、只读)当起点,在本机的 Chrome 里一点就自动驾驶。
-// 用法:node scripts/make_local_plan.mjs --recording-file 回放串.txt --frames 22123 --source "榜单回放(第 1 名)" --out plan.json [--track 导出串文件]
+// 用法:node scripts/make_local_plan.mjs --recording-file 回放串.txt --frames 22123 --source "榜单回放(第 1 名)" --out plan.json [--track 导出串文件 | --game-track summer3|winter2|desert4…]
 //   输出 plan.json = { key: "ptai1:<赛道指纹>", plan: {...} };把 plan 的 JSON 存进该赛道页面的 localStorage[key] 即可
 //   (面板会显示"本地导入:<source>,已通过游戏 Verify";面板上的"清除本赛道缓存"可撤销)。
 // 校验:完成帧 true、少 1 帧 false,不通过就拒绝输出。只在本地运行,不会向游戏服务器上传任何成绩(harness 拒绝所有非静态资源请求)。
@@ -15,7 +15,7 @@ const frames = Number(a.frames);
 // 与 extension/src/core.js 里的 hashTrack 完全一致(FNV-1a 32 位 + 长度)
 function hashTrack(td) { let h = 2166136261 >>> 0; const n = td.length; if (typeof td === 'string') for (let i = 0; i < n; i++) h = Math.imul(h ^ td.charCodeAt(i), 16777619); else for (let i = 0; i < n; i++) h = Math.imul(h ^ td[i], 16777619); return (h >>> 0).toString(16) + '-' + n; }
 
-const g = await launchGame({ mainVirtual: true, ...(a.track && a.track !== true ? { customTrack: fs.readFileSync(a.track, 'utf8').trim() } : {}) });
+const g = await launchGame({ mainVirtual: true, ...(a['game-track'] && a['game-track'] !== true ? { officialTrack: a['game-track'] } : {}), ...(a.track && a.track !== true ? { customTrack: fs.readFileSync(a.track, 'utf8').trim() } : {}) });
 try {
   const td = await g.page.evaluate((i) => { const m = window.__pt.meta[i]; const t = m.creates[m.creates.length - 1].trackData; return typeof t === 'string' ? t : Array.from(t); }, g.rt);
   const id = hashTrack(td);
