@@ -1,6 +1,6 @@
 // 把页面内自动驾驶拼成一个文件 extension/autopilot.js(浏览器扩展内容脚本 / 油猴脚本共用)。
 // 用法:node scripts/build_extension.mjs
-// 拼接顺序:配置 -> page_shim.js(window.__pt:Worker 包装、状态解码、评估池)-> progress.mjs + refpath.mjs + solver.mjs + explorer.mjs(去掉 import/export)-> extension/src/core.js。
+// 拼接顺序:配置 -> page_shim.js(window.__pt:Worker 包装、状态解码、评估池)-> progress.mjs + refpath.mjs + solver.mjs + explorer.mjs(去掉 import/export)-> guide.mjs(引导线数学,window.__ptGuideMath)+ extension/src/guide.js(相机钩子 + 叠加层)-> extension/src/core.js。
 // 里面只有我们自己写的代码;游戏的 Worker 脚本在用户浏览器里运行时才取到,并只在内存中补丁(blob),不会写进本目录。
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -13,6 +13,7 @@ const strip = (src) => src
   .replace(/^export (const|let|function|async function|class) /gm, '$1 ');
 
 const solverBundle = `const __ptSolverMod = (() => {\n${strip(rd('scripts/lib/progress.mjs'))}\n${strip(rd('scripts/lib/refpath.mjs'))}\n${strip(rd('scripts/lib/solver.mjs'))}\n${strip(rd('scripts/lib/explorer.mjs'))}\nreturn { Solver, masksToToggles, togglesToMasks, buildProgress, buildProgressField, buildTrajectoryProgress, exploreLap };\n})();\nwindow.__ptSolver = __ptSolverMod;`;
+const guideBundle = `window.__ptGuideMath = (() => {\n${strip(rd('scripts/lib/guide.mjs'))}\nreturn { GUIDE_STEP, GUIDE_DEFAULTS, buildGuidePath, projectGuide, mulMat4, clipOf, actColor };\n})();\n${rd('extension/src/guide.js')}`;
 const core = rd('extension/src/core.js')
   .replace('__WORKER_SHIM__', () => JSON.stringify(rd('scripts/lib/worker_shim.js')))
   .replace('__EVAL_CASES__', () => JSON.stringify(EVAL_CASES))
@@ -34,6 +35,7 @@ const out = `// ==UserScript==
   window.__ptCfg = { mainVirtual: false, sampleEvery: 0, keepAll: false, keepRecording: false };
 ${rd('scripts/lib/page_shim.js')}
 ${solverBundle}
+${guideBundle}
 ${core}
 })();
 `;

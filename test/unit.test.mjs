@@ -173,3 +173,44 @@ test('参考轨迹势场:flat 模式(飞行中)只比水平位置,高度不同�
   assert.ok(lowFlight.d > 15, `3D 距离应当很大:${lowFlight.d}`); assert.ok(flat.d < 1, `flat 模式只看水平:${flat.d}`);
   assert.ok(Math.abs(flat.s - P.query(50, 0, 30, 0, true).s) < 1, '飞行中进度与高度无关');
 });
+
+// ---------- 引导线(scripts/lib/guide.mjs) ----------
+import { buildGuidePath, projectGuide, mulMat4, clipOf, actColor, GUIDE_STEP } from '../scripts/lib/guide.mjs';
+const persp = (fovY, aspect, n, f) => { const t = 1 / Math.tan(fovY / 2); return Float64Array.from([t / aspect, 0, 0, 0, 0, t, 0, 0, 0, 0, (f + n) / (n - f), -1, 0, 0, (2 * f * n) / (n - f), 0]); };
+const viewAt = (ex, ey, ez) => Float64Array.from([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, -ex, -ey, -ez, 1]); // 相机朝 -z,所以下面的赛道沿 -z 方向
+const straight = (len, y = 0.6, fn = null) => { const out = []; for (let i = 0; i <= len * 100; i++) { const z = -i * 0.01 * GUIDE_STEP; out.push([i * GUIDE_STEP, 100, 8 << 3, 0, 0, 0, fn ? fn(-z) : y, z, 0, 0, 0, 1]); } return out; };
+test('引导线:直路 -> 缎带在屏幕正前方,越远越高、越淡,起点在车前方', () => {
+  const samples = straight(30); const masks = new Uint8Array(samples.length * GUIDE_STEP + 10).fill(1);
+  const path = buildGuidePath(samples, masks); assert.ok(Math.abs(path.length - 300) < 1, 'len=' + path.length);
+  const VP = mulMat4(persp(1, 16 / 9, 0.1, 1000), viewAt(0, 3, 6));
+  const g = projectGuide(path, 5000, VP, 0); // 车在 z = -50 处
+  assert.ok(g.rows > 40 && g.nIdx > 0 && g.nVerts > 0);
+  for (let i = 0; i < g.nVerts * 6; i++) assert.ok(Number.isFinite(g.verts[i]), 'NaN at ' + i);
+  for (let i = 0; i < g.nIdx; i++) assert.ok(g.idx[i] < g.nVerts);
+  const rowsY = []; for (let r = 0; r < g.rows; r++) rowsY.push(g.verts[(4 * r + 1) * 6 + 1]);
+  for (let r = 1; r < rowsY.length; r++) assert.ok(rowsY[r] >= rowsY[r - 1] - 1e-9, '越远应越靠近地平线(屏幕越高)');
+  const cx = g.verts[(4 * 5 + 1) * 6]; assert.ok(Math.abs(cx) < 0.05, '缎带应在屏幕中央: ' + cx);
+  const alpha = (r) => g.verts[(4 * r + 1) * 6 + 5]; assert.ok(alpha(0) < 0.3 && alpha(Math.floor(g.rows / 3)) > 0.5 && alpha(g.rows - 1) < 0.2, '起点淡入、中段实、远端淡出');
+  // 在 6 m 的"车前方"之内不画
+  const p0 = clipOf(VP, path.cx[0], path.cy[0], path.cz[0]); assert.ok(p0[3] > 0);
+});
+test('引导线:远处缎带有最小屏幕宽度;刹车段变红,油门段是绿色', () => {
+  const samples = straight(30); const masks = new Uint8Array(samples.length * GUIDE_STEP + 10).fill(1); for (let f = 1500; f < 2500; f++) masks[f] = 4; // 15~25 m 刹车
+  const path = buildGuidePath(samples, masks); const VP = mulMat4(persp(1, 16 / 9, 0.1, 1000), viewAt(0, 3, 6));
+  const g = projectGuide(path, 0, VP, 0, { minHalfNdc: 0.01 });
+  const half = (r) => Math.abs(g.verts[(4 * r + 2) * 6] - g.verts[(4 * r + 1) * 6]) / 2;
+  const far = g.rows - 8; assert.ok(half(far) >= 0.01 * 0.99, '远处核心半宽 ' + half(far));
+  let sawRed = false, sawGreen = false; for (let r = 0; r < g.rows; r++) { const k = (4 * r + 1) * 6; const R = g.verts[k + 2], G = g.verts[k + 3]; if (R > 0.9 && G < 0.45) sawRed = true; if (R < 0.4 && G > 0.9) sawGreen = true; }
+  assert.ok(sawRed && sawGreen, `red=${sawRed} green=${sawGreen}`);
+  assert.deepEqual(actColor(4), [1.0, 0.34, 0.26]); assert.ok(actColor(1)[1] > 0.9 && actColor(0)[0] > 0.9);
+});
+test('引导线:坡顶后面被挡住的那段淡出(地平线裁剪)', () => {
+  // 一路上坡到 60 m 处的坡顶,然后往下掉:坡顶后面的路应该看不见
+  const samples = straight(40, 0, (d) => (d < 60 ? d * 0.12 : 7.2 - (d - 60) * 0.5));
+  const path = buildGuidePath(samples, null); const VP = mulMat4(persp(1, 16 / 9, 0.1, 1000), viewAt(0, 3, 6));
+  const g = projectGuide(path, 0, VP, 0, { range: 120 });
+  const alphaAt = (r) => g.verts[(4 * r + 1) * 6 + 5]; let maxBefore = 0, maxAfter = 0;
+  // 行的路程 = ahead + rowSpacing * r(起点 6 m);坡顶 60 m
+  for (let r = 0; r < g.rows; r++) { const d = 6 + r * 0.6; if (d < 50) maxBefore = Math.max(maxBefore, alphaAt(r)); if (d > 70) maxAfter = Math.max(maxAfter, alphaAt(r)); }
+  assert.ok(maxBefore > 0.4, '坡顶前应该看得见: ' + maxBefore); assert.ok(maxAfter < 0.05, '坡顶后应该被挡住: ' + maxAfter);
+});

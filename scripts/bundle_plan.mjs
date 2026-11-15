@@ -1,6 +1,6 @@
 // 把一份"已通过游戏 Verify 的求解结果"收进扩展的内置方案表 extension/plans/bundled.json(再运行 node scripts/build_extension.mjs 重建)。
 // 内置的只是按键翻转帧 / 回放串(我们自己的输出),不含任何游戏文件;赛道用"赛道数据指纹"索引,扩展里 curTrackId() 用同一个算法。
-// 用法:node scripts/bundle_plan.mjs --result out/xxx.json --name "Summer 1" [--track scripts/data/slalom.txt]
+// 用法:node scripts/bundle_plan.mjs --result out/xxx.json --name "Summer 1" [--track scripts/data/slalom.txt | --game-track summer3|winter2|desert4…]
 //   不给 --track 时用游戏默认载入的官方赛道(第一条)取指纹;给了就按自定义赛道导入后取指纹。
 //   写入前会再用游戏自带 Verify 校验一遍(完成帧 true、少 1 帧 false),不通过就拒绝写入。
 // 注意:只在本地运行,harness 拒绝所有非静态资源请求,不会上传任何成绩。
@@ -17,7 +17,7 @@ if (!res.recording || !res.finishFrames || !res.toggles) { console.error('结果
 // 与 extension/src/core.js 里的 hashTrack 完全一致(FNV-1a 32 位 + 长度)
 function hashTrack(td) { let h = 2166136261 >>> 0; const n = td.length; if (typeof td === 'string') for (let i = 0; i < n; i++) h = Math.imul(h ^ td.charCodeAt(i), 16777619); else for (let i = 0; i < n; i++) h = Math.imul(h ^ td[i], 16777619); return (h >>> 0).toString(16) + '-' + n; }
 
-const g = await launchGame({ mainVirtual: true, ...(a.track && a.track !== true ? { customTrack: fs.readFileSync(a.track, 'utf8').trim() } : {}) });
+const g = await launchGame({ mainVirtual: true, ...(a['game-track'] && a['game-track'] !== true ? { officialTrack: a['game-track'] } : {}), ...(a.track && a.track !== true ? { customTrack: fs.readFileSync(a.track, 'utf8').trim() } : {}) });
 try {
   const td = await g.page.evaluate((i) => { const m = window.__pt.meta[i]; const t = m.creates[m.creates.length - 1].trackData; return typeof t === 'string' ? t : Array.from(t); }, g.rt);
   const id = hashTrack(td);

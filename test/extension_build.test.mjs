@@ -25,6 +25,8 @@ test('按键显示:面板里有键帽和时间轴,数据源是物理侧的 ctl,d
 
 test('探索式规划已打进产物,并作为规划失败后的兜底', () => {
   assert.ok(js.includes('async function exploreLap(') && js.includes('exploreLap }'));
+  assert.ok(js.includes('window.__ptGuideMath') && js.includes('function projectGuide(') && js.includes('window.__ptGuideUI') && js.includes('prepareGuide'), '引导线(相机钩子 + 叠加层 + 数学)要在产物里');
+  assert.ok(js.includes("'projectionMatrix'") && js.includes('__ptaiOverlay'), '相机钩子要跳过叠加层自己的绘制,否则死循环');
   assert.ok(js.includes('function buildTrajectoryProgress(') && js.includes('buildTrajectoryProgress, exploreLap'), 'solver.mjs imports refpath.mjs, so the bundle must include it');
   assert.ok(js.includes('SOLVER.exploreLap(solver') && js.includes('改用探索式规划'));
 });

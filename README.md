@@ -13,6 +13,7 @@
 ## 在正版页面里用:Chrome 扩展(面板 + 一键自动驾驶)
 
 `extension/` 是一个 Chrome 扩展(MV3,Chrome ≥ 111),只在 `https://app-polytrack.kodub.com/0.6.3/` 生效:页面右上角出现面板,点 **▶ 一键自动驾驶** → 没有这条赛道的方案就先在页面里求解(几分钟),再回到起点按方案自动开。
+自动驾驶时面板显示按键(W/A/S/D 键帽 + 时间轴),**车前方还会画一条发光的引导线**(绿 油门 / 红 刹车 / 黄 滑行,可在面板上开关,做法见 `report/phase0.md` 6.15)。
 安装、面板说明、已知限制见 [`extension/README.md`](extension/README.md)。扩展**不碰网络**:不包装 XHR / fetch / sendBeacon,也没有 `declarativeNetRequest` 规则,成绩提交与排行榜读取完全交回游戏页面。
 
 ```bash
@@ -74,7 +75,7 @@ node --test test/solver.test.mjs      # 端到端(几分钟)
 * 搜索质量没有和"真实最优"对比过(粗估直线理想值 ≈13.7 s)。按键时间线抖动仍然很多。
 * 动作集只有 W / W+左 / W+右 / 刹车;没用 R(检查点重生)。重生在阶段 0 的压力测试里行为一致,但搜索器没利用它。
 * 速度:单次整圈评估 ≈ 50~120 ms(单 Worker);规划时间 97% 是物理模拟,4 线程约 38 万帧/s。slalom 规划约 1.5 分钟(4 线程,撞击提前结束后少约 40% 模拟帧,`report/phase0.md` 6.10)。
-* **新赛道不保证能算出来**:滚动时域规划器在官方 summer2、summer3 上都失败(都含近乎垂直的墙 / 环形曲面结构,渲染截图确认,格子势场表达不了;见 `report/phase0.md` 6.11)。**`solve.mjs --explore`(Go-Explore 式探索,6.13)解出了 summer3**(27.205 s,游戏 Verify 通过,147 s),summer2 冲过了墙和长跳但没冲线;**`--refine`(6.14)把探索出的一圈压快**:slalom_mini 8.9 -> 7.2 s、summer3 27.2 -> 24.9 s(各 n=1,Verify 通过,summer3 第 2 轮起停滞;页面内暂未接入);扩展页面内求解在规划器停滞后会自动改用探索,summer4~7 / winter / desert 没测。能跑通的只有 slalom 和 Summer 1。
+* **新赛道不保证能算出来**:滚动时域规划器在官方 summer2、summer3 上都失败(都含近乎垂直的墙 / 环形曲面结构,渲染截图确认,格子势场表达不了;见 `report/phase0.md` 6.11)。**`solve.mjs --explore`(Go-Explore 式探索,6.13)解出了 summer3**(27.205 s,游戏 Verify 通过,147 s),summer2 冲过了墙和长跳但没冲线;**`--refine`(6.14)把探索出的一圈压快**:slalom_mini 8.9 -> 7.2 s、summer3 27.2 -> 24.9 s(各 n=1,Verify 通过,summer3 第 2 轮起停滞;页面内暂未接入);扩展页面内求解在规划器停滞后会自动改用探索,批量跑官方赛道的初步结果见 `report/phase0.md` 6.16:目前 summer3 / summer6 / winter1 和 Summer 1、slalom 有可用方案(已内置),summer4 / 5 / 7、winter2 没跑通,其余还在跑或没测。**不保证任何赛道能算出来。**
 * 版本固定 0.6.3(Worker 补丁依赖压缩后的代码布局,锚点变了会直接报错)。扩展只匹配 0.6.3 页面。
 * 扩展下:面板上的自动驾驶按 1 倍实时;求解时页面会明显变卡;扩展不改动游戏的任何网络请求(成绩上传由你自行决定)。
 

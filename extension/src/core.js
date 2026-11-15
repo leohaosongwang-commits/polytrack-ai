@@ -10,6 +10,7 @@
 (() => {
   const PT = window.__pt;
   const SOLVER = window.__ptSolver; // { Solver }
+  const GUIDE = window.__ptGuideMath, GUIDEUI = window.__ptGuideUI; // 引导线(见 extension/src/guide.js)
   const GAME_BASE = 'https://app-polytrack.kodub.com/0.6.3/';
   const WORKER_SHIM = __WORKER_SHIM__;
   const EVAL_CASES = __EVAL_CASES__;
@@ -39,7 +40,7 @@
   PT.mapUrl = (url) => (String(url).includes('simulation_worker') ? buildPatchedWorkerUrl(url) : url);
 
   // ================= 2. 时钟推进器(没开自动驾驶时,把真实时间喂给虚拟时钟) =================
-  const S = { driving: false, solving: false, cancel: false, drive: null };
+  const S = { driving: false, solving: false, cancel: false, drive: null, guideOn: (() => { try { return localStorage.getItem('ptai:guide') !== '0'; } catch { return true; } })(), guideStart: null };
   const primaryIdx = () => { for (let i = PT.meta.length - 1; i >= 0; i--) { const m = PT.meta[i]; if (m.realtime === true && !m.ours && m.creates.length > 0) return i; } return -1; };
   {
     let last = performance.now(), acc = 0, pending = false;
@@ -137,6 +138,20 @@
   }
 
   // ================= 6. 自动驾驶 =================
+  // 引导线用的"前方轨迹":方案是确定性的,在评估引擎里整圈跑一遍(每 GUIDE_STEP 帧采一个状态)就知道车接下来会走哪;按方案缓存在内存里
+  const guideCache = new Map();
+  async function prepareGuide(plan) {
+    const key = plan.recording || (plan.finishFrames + ':' + JSON.stringify(plan.toggles).length);
+    if (guideCache.has(key)) return guideCache.get(key);
+    const src = primaryIdx(); if (src < 0) throw new Error('游戏还没准备好');
+    const g = makeG(src); await g.makePool(1);
+    try {
+      const masks = SOLVER.togglesToMasks(plan.toggles, plan.finishFrames + 60);
+      const [r] = await g.evalBatch([Array.from(masks)], { seg: 1, tail: 1, maxFrames: masks.length + 200, sampleEvery: GUIDE.GUIDE_STEP });
+      const pts = r.smp.slice(); if (r.last && (!pts.length || pts[pts.length - 1][0] < r.last[0])) pts.push(r.last);
+      const path = GUIDE.buildGuidePath(pts, masks); guideCache.set(key, path); return path;
+    } finally { for (const p of PT.pool) p.w.terminate(); PT.pool = []; }
+  }
   const KEYMAP = { up: ['KeyW', 'w'], right: ['KeyD', 'd'], down: ['KeyS', 's'], left: ['KeyA', 'a'], reset: ['KeyR', 'r'] };
   // 注入的按键带 __ptai 标记:自动驾驶期间的输入锁靠它区分"自己发的"和"玩家按的"
   const fireKey = (type, code, key) => { const ev = new KeyboardEvent(type, { code, key, bubbles: true, cancelable: true }); ev.__ptai = true; window.dispatchEvent(ev); };
@@ -151,6 +166,9 @@
       // 玩家可能正按住某个键:先全松一次,清掉游戏侧残留的"按下"状态,免得锁了输入后卡在按下
       for (const k of Object.keys(KEYMAP)) press(k, false);
       let w = primaryIdx(); if (w < 0) throw new Error('游戏还没准备好');
+      const guideFor = async () => { try { return await prepareGuide(plan); } catch (e) { ui.log('引导线不可用:' + String(e.message).slice(0, 80)); return null; } };
+      let guidePath = null;
+      if (S.guideOn && GUIDE && GUIDEUI) { ui.status('自动驾驶:生成引导线…'); guidePath = await guideFor(); w = primaryIdx(); }
       let p0 = PT.peek(w);
       if (p0 && (p0.started || p0.frames > 0)) { // 已经开过:T = 回到起点重来(新建一辆车)
         const n0 = PT.meta[w].creates.length;
@@ -171,6 +189,9 @@
         if (PT.peek(w)?.started) break;
       }
       if (!PT.peek(w)?.started) throw new Error('车没有起步(游戏没有响应键盘事件)');
+      const guideFrames = () => PT.peek(w)?.frames ?? null;
+      if (guidePath) GUIDEUI.start(guidePath, guideFrames);
+      S.guideStart = async () => { guidePath ??= await guideFor(); if (guidePath) GUIDEUI.start(guidePath, guideFrames); }; // 驾驶途中才打开"引导线"开关时用
       const t0 = performance.now() - frames(); const endFrame = plan.finishFrames + 1500; let lastUi = 0;
       for (;;) {
         if (ctl.stop) { ui.log('已停止:交还给你'); break; }
@@ -189,7 +210,7 @@
         const now = performance.now(); if (now - lastUi > 120) { lastUi = now; ui.drive(frames(), plan.finishFrames); }
       }
       return { finished: null };
-    } finally { releaseAll(); S.driving = false; S.drive = null; ui.keys(null); }
+    } finally { releaseAll(); S.driving = false; S.drive = null; S.guideStart = null; ui.keys(null); if (GUIDEUI) GUIDEUI.stop(); }
   }
 
   // ================= 7. 面板 =================
@@ -204,6 +225,7 @@
       .t small{font-weight:400;opacity:.6}
       button{all:unset;box-sizing:border-box;display:block;width:100%;text-align:center;cursor:pointer;border-radius:8px;padding:8px 0;font-weight:600;font-size:14px;background:#3b82f6;color:#fff}
       button:hover{filter:brightness(1.1)} button.stop{background:#ef4444} button.busy{background:#6b7280}
+      .row button.off{background:#1a2040;color:#7f89bd}
       .row{display:flex;gap:6px;margin-top:6px} .row button{font-size:11px;font-weight:500;padding:4px 0;background:#2a3358}
       .st{margin:6px 0 2px;min-height:17px;color:#ffe08a} .bar{height:4px;border-radius:2px;background:#2a3358;overflow:hidden;margin:4px 0}
       .bar i{display:block;height:100%;width:0;background:#34d399}
@@ -224,6 +246,7 @@
       <div class="st" id="st">待命</div><div class="bar"><i id="bar"></i></div>
       <div class="keys" id="keys"><div class="kr"><div class="kb"><b class="k r off" id="k_reset">R</b><b class="k" id="k_up" style="grid-column:2;grid-row:1">W</b><b class="k" id="k_left" style="grid-column:1;grid-row:2">A</b><b class="k" id="k_down" style="grid-column:2;grid-row:2">S</b><b class="k" id="k_right" style="grid-column:3;grid-row:2">D</b></div><div class="kt" id="kt">&nbsp;</div></div>
         <canvas id="tl" width="244" height="50"></canvas></div>
+      <div class="row"><button id="gd" tabindex="-1">引导线:开</button></div>
       <div class="row"><button id="clr" tabindex="-1">清除本赛道缓存</button><button id="cp" tabindex="-1">复制回放串</button></div>
       <div class="log" id="log"></div>
       <div class="hk" id="hk"></div>
@@ -352,12 +375,19 @@
       } catch (e) { ui.status('出错:' + e.message); ui.log('出错: ' + e.message); sticky = { id: curTrackId(), text: '出错:' + e.message }; }
       finally { running = false; ui.busy('idle'); }
     };
+    const paintGd = () => { const b = ui.$('gd'); b.textContent = '引导线:' + (S.guideOn ? '开' : '关'); b.classList.toggle('off', !S.guideOn); };
+    paintGd();
+    ui.$('gd').addEventListener('click', () => {
+      S.guideOn = !S.guideOn; try { localStorage.setItem('ptai:guide', S.guideOn ? '1' : '0'); } catch { /* ignore */ }
+      if (GUIDEUI) GUIDEUI.setEnabled(S.guideOn); if (S.guideOn && S.driving && S.guideStart) S.guideStart(); paintGd();
+    });
+    if (GUIDEUI) GUIDEUI.setEnabled(S.guideOn);
     ui.$('go').addEventListener('click', () => trigger());
     installHotkeys(ui, () => trigger());
     installInputLock();
     ui.$('clr').addEventListener('click', () => { const id = curTrackId(); if (id) { clearPlan(id); ui.log('已清除本赛道缓存'); } });
     ui.$('cp').addEventListener('click', async () => { const id = curTrackId(); const p = id && loadPlan(id); if (!p) { ui.log('本赛道还没有方案'); return; } try { await navigator.clipboard.writeText(p.recording); ui.log('回放串已复制'); } catch { ui.log('复制失败(浏览器不允许)'); } });
-    window.__ptai = { PT, S, solve: (o) => solve(ui, o), drive: (p) => drive(p, ui), loadPlan, savePlan, curTrackId, primaryIdx, ui };
+    window.__ptai = { PT, S, prepareGuide, solve: (o) => solve(ui, o), drive: (p) => drive(p, ui), loadPlan, savePlan, curTrackId, primaryIdx, ui };
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();

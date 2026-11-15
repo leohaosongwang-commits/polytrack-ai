@@ -852,6 +852,236 @@ async function exploreLap(S, o = {}) {
 return { Solver, masksToToggles, togglesToMasks, buildProgress, buildProgressField, buildTrajectoryProgress, exploreLap };
 })();
 window.__ptSolver = __ptSolverMod;
+window.__ptGuideMath = (() => {
+// 引导线(自动驾驶时画在车前面的"赛车线"):纯数学部分,不碰 DOM / WebGL,所以能在 Node 里单测。
+//
+// 思路:方案是确定性的,把它在评估引擎里整圈跑一遍(每 GUIDE_STEP 帧采一个状态),得到"车接下来要走的轨迹";
+// 再用游戏自己的 three.js 相机矩阵(projectionMatrix * viewMatrix)把这条轨迹投影到屏幕上,画成一条贴地的发光缎带:
+//   · 颜色 = 那一刻方案按的键(油门 薄荷绿 / 刹车 红 / 滑行 琥珀),所以能提前看出哪里要刹车;
+//   · 离车越远越淡,起点在车头前面几米(不盖住车),缎带上有向前流动的箭头;
+//   · 2D 叠加画不出遮挡,所以用"地平线裁剪"补一点:沿路线从近到远,某个点投影后比前面所有点的最高屏幕位置还低,就说明被前面的坡顶挡住了,淡出。
+// 矩阵是列主序(WebGL / three.js 惯例);世界坐标与物理侧坐标一致(渲染里车的 modelMatrix 平移 == 物理侧位置,已实测)。
+const GUIDE_STEP = 10; // 采样间隔(帧;1 帧 = 1 ms),30 m/s 时点距 0.3 m
+const popcount4 = (v) => (v & 1) + ((v >> 1) & 1) + ((v >> 2) & 1) + ((v >> 3) & 1);
+const norm3 = (x, y, z) => { const l = Math.hypot(x, y, z); return l > 1e-9 ? [x / l, y / l, z / l] : [0, 0, 0]; };
+
+/** 键位掩码 -> 缎带颜色(0..1)。1 = W 油门,4 = S 刹车 */
+function actColor(mask) {
+  if (mask & 4) return [1.0, 0.34, 0.26];
+  if (mask & 1) return [0.22, 0.98, 0.76];
+  return [1.0, 0.82, 0.32];
+}
+
+/**
+ * samples:评估引擎的采样状态 [[帧, 车速, flags, 完成帧, cp, x, y, z, qx, qy, qz, qw], ...](按帧序,间隔 GUIDE_STEP)
+ * masks:逐帧键位掩码(可选,用来给缎带上色)
+ * 返回:贴地缎带的中心线 + 横向单位向量 + 弧长,供 projectGuide 使用
+ */
+function buildGuidePath(samples, masks = null, { drop = 0.62, smooth = 2 } = {}) {
+  const n = samples.length; if (n < 4) throw new Error('轨迹太短,画不了引导线');
+  const px = new Float64Array(n), py = new Float64Array(n), pz = new Float64Array(n), ux = new Float64Array(n), uy = new Float64Array(n), uz = new Float64Array(n);
+  const frames = new Int32Array(n), speed = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const s = samples[i]; frames[i] = s[0]; speed[i] = s[1]; px[i] = s[5]; py[i] = s[6]; pz[i] = s[7];
+    if (popcount4((s[2] >> 3) & 15) >= 2) { // 至少两个轮子着地:车身朝上的方向可信(坡道 / 倾斜路面);腾空时用世界的上
+      const x = s[8], y = s[9], z = s[10], w = s[11];
+      ux[i] = 2 * (x * y - w * z); uy[i] = 1 - 2 * (x * x + z * z); uz[i] = 2 * (y * z + w * x);
+    } else { ux[i] = 0; uy[i] = 1; uz[i] = 0; }
+  }
+  const box = (a) => { const o = new Float64Array(n); for (let i = 0; i < n; i++) { let t = 0, c = 0; for (let k = Math.max(0, i - smooth); k <= Math.min(n - 1, i + smooth); k++) { t += a[k]; c++; } o[i] = t / c; } return o; };
+  const sx = box(px), sy = box(py), sz = box(pz), sux = box(ux), suy = box(uy), suz = box(uz);
+  const cx = new Float64Array(n), cy = new Float64Array(n), cz = new Float64Array(n), rx = new Float64Array(n), ry = new Float64Array(n), rz = new Float64Array(n), arc = new Float64Array(n);
+  let prev = [1, 0, 0];
+  for (let i = 0; i < n; i++) {
+    const u = norm3(sux[i], suy[i], suz[i]); const uu = u[0] || u[1] || u[2] ? u : [0, 1, 0];
+    cx[i] = sx[i] - drop * uu[0]; cy[i] = sy[i] - drop * uu[1]; cz[i] = sz[i] - drop * uu[2];
+    const a = Math.max(0, i - 2), b = Math.min(n - 1, i + 2);
+    const d = norm3(sx[b] - sx[a], sy[b] - sy[a], sz[b] - sz[a]);
+    // 右向量 = 行进方向 x 车身上方向(停着不动时 d 为 0,沿用上一个)
+    let r = norm3(d[1] * uu[2] - d[2] * uu[1], d[2] * uu[0] - d[0] * uu[2], d[0] * uu[1] - d[1] * uu[0]);
+    if (!(r[0] || r[1] || r[2])) r = prev; else prev = r;
+    rx[i] = r[0]; ry[i] = r[1]; rz[i] = r[2];
+    if (i) arc[i] = arc[i - 1] + Math.hypot(cx[i] - cx[i - 1], cy[i] - cy[i - 1], cz[i] - cz[i - 1]);
+  }
+  // 颜色:每个采样点取附近几个采样点按键的平均,避免短促的点按让颜色闪
+  const col = new Float32Array(3 * n);
+  if (masks) {
+    for (let i = 0; i < n; i++) {
+      let r = 0, g = 0, b = 0, c = 0;
+      for (let k = Math.max(0, i - 3); k <= Math.min(n - 1, i + 3); k++) { const m = masks[Math.min(masks.length - 1, frames[k])] | 0; const [cr, cg, cb] = actColor(m); r += cr; g += cg; b += cb; c++; }
+      col[3 * i] = r / c; col[3 * i + 1] = g / c; col[3 * i + 2] = b / c;
+    }
+  } else for (let i = 0; i < n; i++) { col[3 * i] = 0.22; col[3 * i + 1] = 0.98; col[3 * i + 2] = 0.76; }
+  return { n, step: n > 1 ? frames[1] - frames[0] : GUIDE_STEP, frames, speed, cx, cy, cz, rx, ry, rz, arc, col, length: arc[n - 1] };
+}
+
+/** 世界坐标点 -> 裁剪坐标(VP 是列主序 4x4:projection * view) */
+function clipOf(VP, x, y, z, out = [0, 0, 0, 0]) {
+  out[0] = VP[0] * x + VP[4] * y + VP[8] * z + VP[12]; out[1] = VP[1] * x + VP[5] * y + VP[9] * z + VP[13];
+  out[2] = VP[2] * x + VP[6] * y + VP[10] * z + VP[14]; out[3] = VP[3] * x + VP[7] * y + VP[11] * z + VP[15];
+  return out;
+}
+function mulMat4(a, b) { // a * b,列主序
+  const o = new Float64Array(16);
+  for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) { let t = 0; for (let k = 0; k < 4; k++) t += a[k * 4 + r] * b[c * 4 + k]; o[c * 4 + r] = t; }
+  return o;
+}
+const smooth01 = (t) => { t = t < 0 ? 0 : t > 1 ? 1 : t; return t * t * (3 - 2 * t); };
+
+const GUIDE_DEFAULTS = { ahead: 6, range: 170, hCore: 0.55, hOut: 1.4, baseAlpha: 0.9, rowSpacing: 0.6, chevSpacing: 7, chevHalf: 0.62, minHalfNdc: 0.004, maxWiden: 14 };
+
+/**
+ * 把"车当前所在帧 f 往前 range 米"的缎带投影到屏幕(NDC),顶点格式 [x, y, r, g, b, a] x 4 个/行(外左 0、内左 a、内右 a、外右 0:边缘羽化)。
+ * 返回 { verts: Float32Array, idx: Uint32Array, nVerts, nIdx, rows },箭头的三角形接在同一个数组后面。
+ * VP:projection * view;time:秒(箭头流动动画用);opts 见 GUIDE_DEFAULTS。
+ */
+function projectGuide(path, f, VP, time = 0, opts = {}) {
+  const o = { ...GUIDE_DEFAULTS, ...opts };
+  const { n, frames, arc, cx, cy, cz, rx, ry, rz, col } = path;
+  const t = (f - frames[0]) / path.step; const i0 = Math.max(0, Math.min(n - 2, Math.floor(t))); const fr = Math.max(0, Math.min(1, t - i0));
+  const sCar = arc[i0] + fr * (arc[i0 + 1] - arc[i0]), sStart = sCar + o.ahead, sEnd = sCar + o.range;
+  let j = i0; while (j < n - 1 && arc[j] < sStart) j++;
+  const maxRows = Math.ceil(o.range / o.rowSpacing) + 10, maxChev = Math.ceil(o.range / o.chevSpacing) + 4;
+  const verts = new Float32Array((maxRows * 4 + maxChev * 6) * 6), idx = new Uint32Array(maxRows * 18 + maxChev * 12); let nv = 0, ni = 0, rows = 0;
+  const rowS = [], rowA = [], rowR = [];
+  const c4 = [0, 0, 0, 0]; let hMax = -Infinity, lastArc = -1e9;
+  const pushV = (x, y, r, g, b, a) => { const k = nv * 6; verts[k] = x; verts[k + 1] = y; verts[k + 2] = r; verts[k + 3] = g; verts[k + 4] = b; verts[k + 5] = a; return nv++; };
+  for (; j < n; j++) {
+    const s = arc[j]; if (s > sEnd) break;
+    if (s - lastArc < o.rowSpacing && j < n - 1) continue; lastArc = s;
+    clipOf(VP, cx[j], cy[j], cz[j], c4); if (!(c4[3] > 0.2)) { if (rows) break; else continue; } // 在相机后面 / 太近:缎带到此为止
+    const ndcX = c4[0] / c4[3], ndcY = c4[1] / c4[3];
+    const vis = hMax === -Infinity ? 1 : Math.max(0, Math.min(1, 1 + (ndcY - hMax) / 0.03)); // 地平线裁剪:低于前面最高点就淡出
+    if (ndcY > hMax) hMax = ndcY;
+    // 远处缎带在屏幕上会细成一根线:保证核心至少 minHalfNdc 宽(横向放宽,最多 maxWiden 倍),远处也看得见
+    clipOf(VP, cx[j] + rx[j] * o.hCore, cy[j] + ry[j] * o.hCore, cz[j] + rz[j] * o.hCore, c4);
+    const half = c4[3] > 0.05 ? Math.abs(c4[0] / c4[3] - ndcX) : 0; const k = half > 1e-9 ? Math.min(o.maxWiden, Math.max(1, o.minHalfNdc / half)) : 1;
+    const d = s - sCar; const alpha = o.baseAlpha * smooth01((d - o.ahead) / 8) * Math.pow(Math.max(0, 1 - d / o.range), 0.9) * vis;
+    const r = col[3 * j], g = col[3 * j + 1], b = col[3 * j + 2];
+    const pts = [[-o.hOut * k, 0], [-o.hCore * k, 1], [o.hCore * k, 1], [o.hOut * k, 0]]; const base = nv; let ok = true;
+    for (const [off, solid] of pts) {
+      clipOf(VP, cx[j] + rx[j] * off, cy[j] + ry[j] * off, cz[j] + rz[j] * off, c4);
+      if (!(c4[3] > 0.05)) { ok = false; break; }
+      pushV(c4[0] / c4[3], c4[1] / c4[3], r, g, b, solid ? alpha : 0);
+    }
+    if (!ok) { nv = base; break; }
+    if (rows) { const p = base - 4; for (let q = 0; q < 3; q++) { idx[ni++] = p + q; idx[ni++] = p + q + 1; idx[ni++] = base + q; idx[ni++] = p + q + 1; idx[ni++] = base + q + 1; idx[ni++] = base + q; } }
+    rowS.push(s); rowA.push(alpha); rowR.push(j); rows++;
+  }
+  // 箭头:每 chevSpacing 米一个,整体随时间向前流动
+  const phase = (time * 9) % o.chevSpacing;
+  if (rows > 1) {
+    let k = 0; const first = rowS[0];
+    for (let s = Math.ceil((first - phase) / o.chevSpacing) * o.chevSpacing + phase; s <= rowS[rowS.length - 1]; s += o.chevSpacing) {
+      while (k < rowS.length - 2 && rowS[k + 1] < s) k++;
+      const j0 = rowR[k], j1 = rowR[Math.min(rowR.length - 1, k + 1)], sp = rowS[k + 1] - rowS[k]; const u = sp > 1e-6 ? Math.max(0, Math.min(1, (s - rowS[k]) / sp)) : 0;
+      const a = (rowA[k] + (rowA[Math.min(rowA.length - 1, k + 1)] - rowA[k]) * u) * 0.95; if (a < 0.02) continue;
+      const mx = cx[j0] + (cx[j1] - cx[j0]) * u, my = cy[j0] + (cy[j1] - cy[j0]) * u, mz = cz[j0] + (cz[j1] - cz[j0]) * u;
+      const dx = cx[j1] - cx[j0], dy = cy[j1] - cy[j0], dz = cz[j1] - cz[j0]; const dl = Math.hypot(dx, dy, dz); if (dl < 1e-6) continue;
+      const fx = dx / dl, fy = dy / dl, fz = dz / dl, qx = rx[j0], qy = ry[j0], qz = rz[j0];
+      const H = o.chevHalf; const shape = [[0, 0.62], [H, -0.1], [H, -0.46], [0, 0.04], [-H, -0.46], [-H, -0.1]]; const bv = nv; let ok = true;
+      for (const [lx, lf] of shape) { clipOf(VP, mx + qx * lx + fx * lf, my + qy * lx + fy * lf + 0.02, mz + qz * lx + fz * lf, c4); if (!(c4[3] > 0.05)) { ok = false; break; } pushV(c4[0] / c4[3], c4[1] / c4[3], 1, 1, 1, a); }
+      if (!ok) { nv = bv; continue; }
+      for (const t3 of [[0, 1, 2], [0, 2, 3], [0, 3, 4], [0, 4, 5]]) { idx[ni++] = bv + t3[0]; idx[ni++] = bv + t3[1]; idx[ni++] = bv + t3[2]; }
+    }
+  }
+  return { verts, idx, nVerts: nv, nIdx: ni, rows };
+}
+
+return { GUIDE_STEP, GUIDE_DEFAULTS, buildGuidePath, projectGuide, mulMat4, clipOf, actColor };
+})();
+// 自动驾驶引导线(车前方的发光赛车线)的浏览器侧:取游戏相机矩阵 + 叠加层渲染。数学部分在 scripts/lib/guide.mjs(构建时一起打进来)。
+//
+// 取相机:游戏用 three.js(WebGL2),每个物体 / 每遍渲染都会 uniformMatrix4fv 上传 projectionMatrix 和 viewMatrix。
+// 这里在 WebGL2 原型上包一层,按"当前 program"记住最近一次上传的这两个矩阵;每次 draw 时,如果当前 program 的投影是透视的(m[11] === -1,阴影遍是正交的),
+// 就把它当作主相机。每帧的最后一次 draw 之后(同一个任务结束时的微任务)再画我们的叠加层,所以用的是这一帧的相机,不会慢一拍。
+// 叠加层是单独的一块 WebGL 画布(position:fixed,pointer-events:none,不碰游戏自己的 GL 状态),只在自动驾驶且开着"引导线"时才有开销。
+// 不碰网络、不改游戏的任何绘制;只读矩阵。
+(() => {
+  const GL2 = window.WebGL2RenderingContext;
+  const GM = window.__ptGuideMath; // { buildGuidePath, projectGuide, mulMat4 }
+  const R = (window.__ptGuideRT = { cam: null, canvas: null, active: null, enabled: true, err: null, frames: 0 });
+  if (!GL2 || !GM || R.hooked) return; R.hooked = true;
+
+  const kindOf = new WeakMap(); const progs = new Map(); let cur = null, pending = false;
+  const gUL = GL2.prototype.getUniformLocation;
+  GL2.prototype.getUniformLocation = function (p, n) { const l = gUL.call(this, p, n); if (l && (n === 'projectionMatrix' || n === 'viewMatrix')) kindOf.set(l, n); return l; };
+  const uP = GL2.prototype.useProgram;
+  GL2.prototype.useProgram = function (p) { cur = p; return uP.call(this, p); };
+  const uM = GL2.prototype.uniformMatrix4fv;
+  GL2.prototype.uniformMatrix4fv = function (loc, tr, v, off) {
+    const k = kindOf.get(loc);
+    if (k && cur && v && v.length >= 16) { let s = progs.get(cur); if (!s) progs.set(cur, (s = {})); const m = new Float32Array(16), o = off | 0; for (let i = 0; i < 16; i++) m[i] = v[o + i]; s[k] = m; }
+    return uM.apply(this, arguments);
+  };
+  const onDraw = function () {
+    if (!R.active || (this.canvas && this.canvas.__ptaiOverlay)) return; // 叠加层自己的绘制不算(否则每画一帧又排一个微任务,死循环)
+    const s = progs.get(cur);
+    if (s && s.projectionMatrix && s.viewMatrix && s.projectionMatrix[11] === -1) { R.cam = { P: s.projectionMatrix, V: s.viewMatrix }; R.canvas = this.canvas; }
+    if (pending) return; pending = true;
+    queueMicrotask(() => { try { if (R.active) frame(); } catch (e) { R.err = String(e && e.message || e); } finally { pending = false; } });
+  };
+  for (const name of ['drawElements', 'drawArrays', 'drawElementsInstanced', 'drawArraysInstanced']) {
+    const orig = GL2.prototype[name]; if (!orig) continue;
+    GL2.prototype[name] = function () { onDraw.call(this); return orig.apply(this, arguments); };
+  }
+
+  // ---------- 叠加层渲染 ----------
+  let ov = null; // { cv, gl, prog, vb, ib, loc }
+  function makeOverlay() {
+    const cv = document.createElement('canvas'); cv.id = 'ptai-guide'; cv.__ptaiOverlay = true;
+    cv.style.cssText = 'position:fixed;left:0;top:0;width:0;height:0;pointer-events:none;z-index:2;display:none;';
+    const gl = cv.getContext('webgl2', { alpha: true, premultipliedAlpha: true, antialias: true, depth: false, stencil: false });
+    if (!gl) return null;
+    const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error('引导线着色器:' + gl.getShaderInfoLog(s)); return s; };
+    const prog = gl.createProgram();
+    gl.attachShader(prog, sh(gl.VERTEX_SHADER, '#version 300 es\nin vec2 a_pos; in vec4 a_col; out vec4 v_col; void main(){ gl_Position = vec4(a_pos, 0.0, 1.0); v_col = a_col; }'));
+    gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, '#version 300 es\nprecision mediump float; in vec4 v_col; out vec4 o; void main(){ o = vec4(v_col.rgb * v_col.a, v_col.a); }'));
+    gl.linkProgram(prog); if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error('引导线着色器链接失败');
+    const vao = gl.createVertexArray(); gl.bindVertexArray(vao);
+    const vb = gl.createBuffer(), ib = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, vb);
+    const lp = gl.getAttribLocation(prog, 'a_pos'), lc = gl.getAttribLocation(prog, 'a_col');
+    gl.enableVertexAttribArray(lp); gl.vertexAttribPointer(lp, 2, gl.FLOAT, false, 24, 0);
+    gl.enableVertexAttribArray(lc); gl.vertexAttribPointer(lc, 4, gl.FLOAT, false, 24, 8);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib);
+    gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA); gl.disable(gl.DEPTH_TEST); gl.disable(gl.CULL_FACE);
+    document.documentElement.appendChild(cv);
+    return { cv, gl, prog, vao, vb, ib };
+  }
+  function clearOverlay() { if (!ov || ov.cleared) return; ov.gl.clearColor(0, 0, 0, 0); ov.gl.clear(ov.gl.COLOR_BUFFER_BIT); ov.cv.style.display = 'none'; ov.cleared = true; }
+
+  function frame() {
+    const A = R.active; if (!A || !R.cam || !R.canvas) return;
+    if (!R.enabled) { clearOverlay(); return; }
+    if (!ov) { ov = makeOverlay(); if (!ov) { R.err = '没有 WebGL2,画不了引导线'; R.active = null; return; } }
+    const rect = R.canvas.getBoundingClientRect(); if (rect.width < 8 || rect.height < 8) { clearOverlay(); return; }
+    const st = ov.cv.style;
+    ov.cleared = false; st.display = 'block'; st.left = rect.left + 'px'; st.top = rect.top + 'px'; st.width = rect.width + 'px'; st.height = rect.height + 'px';
+    const dpr = Math.min(2, window.devicePixelRatio || 1), w = Math.round(rect.width * dpr), h = Math.round(rect.height * dpr);
+    if (ov.cv.width !== w || ov.cv.height !== h) { ov.cv.width = w; ov.cv.height = h; }
+    const gl = ov.gl; gl.viewport(0, 0, w, h); gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
+    const f = A.frames(); if (f == null) return;
+    const VP = GM.mulMat4(R.cam.P, R.cam.V);
+    const g = GM.projectGuide(A.path, f, VP, performance.now() / 1000, { minHalfNdc: 2.6 / (rect.width / 2) }); // 核心至少约 2.6 像素半宽
+    R.frames++; R.lastRows = g.rows;
+    if (!g.nIdx) return;
+    gl.useProgram(ov.prog); gl.bindVertexArray(ov.vao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, ov.vb); gl.bufferData(gl.ARRAY_BUFFER, g.verts.subarray(0, g.nVerts * 6), gl.DYNAMIC_DRAW);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ov.ib); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, g.idx.subarray(0, g.nIdx), gl.DYNAMIC_DRAW);
+    gl.drawElements(gl.TRIANGLES, g.nIdx, gl.UNSIGNED_INT, 0);
+  }
+
+  window.__ptGuideUI = {
+    /** 开始画:path = buildGuidePath 的结果;frames() 返回车当前的物理帧 */
+    start(path, frames) { R.active = { path, frames }; R.err = null; },
+    stop() { R.active = null; R.cam = null; clearOverlay(); },
+    setEnabled(on) { R.enabled = !!on; if (!on) clearOverlay(); },
+    isEnabled: () => R.enabled,
+    rt: R,
+  };
+})();
+
 // PolyTrack AI — 页面内自动驾驶(扩展的 MAIN world 脚本,构建时与 page_shim / solver 拼成一个 autopilot.js)。
 // 仅个人学习研究;只支持 PolyTrack 0.6.3(https://app-polytrack.kodub.com/0.6.3/)。
 //
@@ -864,6 +1094,7 @@ window.__ptSolver = __ptSolverMod;
 (() => {
   const PT = window.__pt;
   const SOLVER = window.__ptSolver; // { Solver }
+  const GUIDE = window.__ptGuideMath, GUIDEUI = window.__ptGuideUI; // 引导线(见 extension/src/guide.js)
   const GAME_BASE = 'https://app-polytrack.kodub.com/0.6.3/';
   const WORKER_SHIM = "// 在物理 Worker 脚本最前面注入(由 harness 在浏览器侧、内存中拼接,不落盘、不分发游戏文件)。\n// 作用:把 Worker 里的 performance.now / Date.now / requestAnimationFrame / setTimeout / setInterval\n// 换成由主线程消息驱动的\"虚拟时钟\"。游戏自己的物理循环代码保持原样,只是时间由我们推进。\n(() => {\n  const g = self;\n  let vnow = 0;\n  const T0 = 1.7e12;\n  let nid = 1;\n  let rafQ = [];\n  const timers = new Map(); // id -> {fn, due, every}\n  Object.defineProperty(g.performance, 'now', { value: () => vnow, configurable: true, writable: true });\n  Date.now = () => Math.floor(T0 + vnow);\n  g.requestAnimationFrame = (cb) => { const id = nid++; rafQ.push([id, cb]); return id; };\n  g.cancelAnimationFrame = (id) => { rafQ = rafQ.filter((e) => e[0] !== id); };\n  g.setTimeout = (fn, ms = 0, ...a) => { const id = nid++; timers.set(id, { fn: () => fn(...a), due: vnow + Math.max(0, ms), every: 0 }); return id; };\n  g.setInterval = (fn, ms = 0, ...a) => { const id = nid++; const e = Math.max(1e-3, ms); timers.set(id, { fn: () => fn(...a), due: vnow + e, every: e }); return id; };\n  g.clearTimeout = g.clearInterval = (id) => { timers.delete(id); };\n\n  function tick() {\n    for (const [id, t] of [...timers]) {\n      if (!timers.has(id) || t.due > vnow) continue;\n      if (t.every) t.due = vnow + t.every; else timers.delete(id);\n      t.fn();\n    }\n    const q = rafQ; rafQ = [];\n    for (const [, cb] of q) cb(vnow);\n  }\n  g.addEventListener('message', (ev) => {\n    const d = ev.data;\n    if (!d || typeof d !== 'object' || !d.__vt) return;\n    ev.stopImmediatePropagation();\n    if (d.__vt === 'advance') {\n      // 以固定步长 d.step(ms)推进 d.ms 毫秒虚拟时间;每个步长触发一次到期定时器 + 一轮 rAF 回调\n      let rem = d.ms;\n      const step = d.step > 0 ? d.step : 1000 / 60;\n      while (rem > 1e-9) { const dt = Math.min(step, rem); vnow += dt; rem -= dt; tick(); }\n      g.postMessage({ __vt: 'done', id: d.id, vnow });\n    } else if (d.__vt === 'track') {\n      // 仅在 harness 以 exposeTrack 打补丁时可用:self.__Ko / self.__ho 由补丁暴露\n      const Ko = g.__Ko, ho = g.__ho;\n      if (!Ko || !ho) { g.postMessage({ __vt: 'track', id: d.id, error: 'internals not exposed' }); return; }\n      const tr = Ko.fromSaveString(d.trackData);\n      const parts = [];\n      tr.forEachPart((x, y, z, partId, rotation, axis, color, cpOrder, startOrder) => {\n        const cfg = ho.find((c) => c.id === partId); const cells = [];\n        if (cfg) cfg.tiles.rotated(rotation, axis).forEach((a, b, c2) => cells.push([x + a, y + b, z + c2]));\n        parts.push({ x, y, z, partId, rotation, axis, color, cpOrder, startOrder, category: cfg?.category, cells });\n      });\n      const st = tr.getStartTransform();\n      const info = {};\n      for (const p of parts) {\n        if (info[p.partId]) continue;\n        const cfg = ho.find((c) => c.id === p.partId);\n        const tiles = []; if (cfg) cfg.tiles.rotated(0, 0).forEach((a, b, c2) => tiles.push([a, b, c2]));\n        info[p.partId] = { category: cfg?.category, detector: cfg?.detector ? JSON.parse(JSON.stringify(cfg.detector)) : null, startOffset: cfg?.startOffset ? JSON.parse(JSON.stringify(cfg.startOffset)) : null, tilesUnrotated: tiles };\n      }\n      g.postMessage({ __vt: 'track', id: d.id, parts, info, start: st ? { position: { x: st.position.x, y: st.position.y, z: st.position.z }, quaternion: { x: st.quaternion.x, y: st.quaternion.y, z: st.quaternion.z, w: st.quaternion.w } } : null });\n    } else if (d.__vt === 'catalog') {\n      // 仅在 exposeTrack 补丁下可用:列出全部部件配置(id、类别、未旋转的占格、检测器、起点偏移),用于设计赛道\n      const ho = g.__ho;\n      if (!ho) { g.postMessage({ __vt: 'catalog', id: d.id, error: 'internals not exposed' }); return; }\n      const parts = ho.map((cfg) => { const tiles = []; cfg.tiles.rotated(0, 0).forEach((a, b, c) => tiles.push([a, b, c])); const rot = [1, 2, 3].map((r) => { const o = []; cfg.tiles.rotated(r, 0).forEach((a, b, c) => o.push([a, b, c])); return o; }); return { id: cfg.id, category: cfg.category, tiles, rot, detector: cfg.detector ? JSON.parse(JSON.stringify(cfg.detector)) : null, startOffset: cfg.startOffset ? JSON.parse(JSON.stringify(cfg.startOffset)) : null }; });\n      g.postMessage({ __vt: 'catalog', id: d.id, parts });\n    } else if (d.__vt === 'build') {\n      // 用游戏自己的赛道类生成一条我们自己设计的测试赛道,返回存档串与导出串(PolyTrack2...)\n      const Ko = g.__Ko;\n      if (!Ko) { g.postMessage({ __vt: 'build', id: d.id, error: 'internals not exposed' }); return; }\n      const base = Ko.fromSaveString(d.baseTrackData);\n      const tr = new Ko(base.environment, base.sunDirection);\n      for (const p of d.parts) tr.addPart(p.x, p.y, p.z, p.partId, p.rotation, p.axis ?? 0, p.color ?? 0, p.cpOrder ?? null, p.startOrder ?? null);\n      g.postMessage({ __vt: 'build', id: d.id, save: tr.toSaveString(), exportString: tr.toExportString({ name: d.name, author: null, lastModified: null }), start: (() => { const s = tr.getStartTransform(); return s ? { position: { x: s.position.x, y: s.position.y, z: s.position.z }, quaternion: { x: s.quaternion.x, y: s.quaternion.y, z: s.quaternion.z, w: s.quaternion.w } } : null; })() });\n    } else if (d.__vt === 'now') {\n      g.postMessage({ __vt: 'now', id: d.id, vnow });\n    }\n  });\n})();\n";
   const EVAL_CASES = "case 101:self.__ev={trk:Ko.fromSaveString(r.trackData),mv:r.mountainVertices,mo:r.mountainOffset,snap:null,snap0:null,f:0};\nself.__dec=function(u,f){const dv=new DataView(u.buffer,u.byteOffset,u.byteLength);const fl=u[11];let o=12,fin=-1;if(fl&2){fin=u[o]|u[o+1]<<8|u[o+2]<<16;o+=3}\nconst cp=dv.getUint16(o,true);o+=2;return[f,dv.getFloat32(7,true),fl,fin,cp,dv.getFloat32(o,true),dv.getFloat32(o+4,true),dv.getFloat32(o+8,true),dv.getFloat32(o+12,true),dv.getFloat32(o+16,true),dv.getFloat32(o+20,true),dv.getFloat32(o+24,true)]};\npostMessage({__vt:\"prep\",id:r.id});break;\ncase 103:postMessage({__vt:\"probe\",id:r.id,heap:t.HEAPU8.length});break;\ncase 102:!function(e){\nconst V=self.__ev,seg=e.seg||1,dec=self.__dec;let u=null,f=0;\nif(!V.snap0){s(1,V.mv,new R(V.mo.x,V.mo.y,V.mo.z),V.trk,V.trk.getStartTransform());V.snap0=t.HEAPU8.slice()}\nif(V.snap&&!e.reset){t.HEAPU8.set(V.snap);f=V.f}else{t.HEAPU8.set(V.snap0);f=0}\nconst h={id:1};let fin=-1;\nfor(let ai=0;ai<e.actions.length;ai++){const m=e.actions[ai],sg=e.segs?e.segs[ai]:seg;for(let j=0;j<sg;j++){u=new Uint8Array(n(h,{up:!!(m&1),right:!!(m&2),down:!!(m&4),left:!!(m&8),reset:!!(m&16)}));f++;if(u[11]&2){fin=u[12]|u[13]<<8|u[14]<<16;break}}if(fin>=0)break}\nV.snap=t.HEAPU8.slice();V.f=f;\npostMessage({__vt:\"commit\",id:e.id,frames:f,fin:fin,last:u?dec(u,f):null})}(r);break;\ncase 100:!function(e){\nconst V=self.__ev,dec=self.__dec,out=[];\nconst maxF=Math.min(e.maxFrames||60000,5999999),se=e.sampleEvery|0,seg=e.seg||1,tail=e.tail|0,minY=e.minY==null?-1e9:e.minY;\nlet bd=null;if(e.segs){bd=[];let c=0;for(const x of e.segs){c+=x;bd.push(c)}}\nconst smpAt=e.sampleAt?new Set(e.sampleAt):null;const TA=e.tailArr||null;\nconst CS=e.crashStop||null;const hist=CS?new Float32Array(CS.w|0||50):null;\nlet st=null;\nif(!e.fromCommit)st=V.trk.getStartTransform();else{if(!V.snap0){s(1,V.mv,new R(V.mo.x,V.mo.y,V.mo.z),V.trk,V.trk.getStartTransform());V.snap0=t.HEAPU8.slice()}if(!V.snap){V.snap=V.snap0;V.f=0}}\nfor(let k=0;k<e.plans.length;k++){\nconst plan=e.plans[k],id=e.fromCommit?1:e.carIdBase+k;\nlet f0=0;\nif(e.fromCommit){t.HEAPU8.set(V.snap);f0=V.f}else s(id,V.mv,new R(V.mo.x,V.mo.y,V.mo.z),V.trk,st);\nconst h={id};let f=f0,u=null,fin=-1,dead=false,ai=0,crashed=false;const smp=[];\nconst GT=e.gate||null;let crossed=false,fc=0;const sh=GT&&GT.shifts?(GT.shifts[k]|0):0;\nfor(;f<f0+maxF;f++){\nlet a;if(bd){while(ai<bd.length&&f-f0>=bd[ai])ai++;a=ai}else a=((f-f0)/seg)|0;let m=a<plan.length?plan[a]:(TA?(TA[a-plan.length]??tail):tail);\nif(crossed){const pi=f-fc+sh;m=(pi>=0&&pi<GT.post.length)?GT.post[pi]:tail}\nu=new Uint8Array(n(h,{up:!!(m&1),right:!!(m&2),down:!!(m&4),left:!!(m&8),reset:!!(m&16)}));\nif(u[11]&2){fin=u[12]|u[13]<<8|u[14]<<16;f++;break}\nif(CS){const sp=new DataView(u.buffer,u.byteOffset,u.byteLength).getFloat32(7,true),k=(f-f0)%hist.length,old=hist[k];hist[k]=sp;if(f-f0>=hist.length&&old-sp>CS.drop&&old>CS.minV){crashed=true;f++;break}}\nif(GT&&!crossed&&a>=plan.length){const dv=new DataView(u.buffer);if((dv.getFloat32(14,true)-GT.p[0])*GT.d[0]+(dv.getFloat32(18,true)-GT.p[1])*GT.d[1]+(dv.getFloat32(22,true)-GT.p[2])*GT.d[2]>=0){crossed=true;fc=f+1}}\nif(smpAt?smpAt.has(f+1-f0):(se&&(f+1-f0)%se===0))smp.push(dec(u,f+1));\nif(minY>-1e8&&new DataView(u.buffer).getFloat32(18,true)<minY){dead=true;f++;break}}\nlet extra=0;\nif(e.airMax&&fin<0&&!dead&&!crashed&&((u[11]>>3)&15)===0){const am=e.airTail|0,settle=e.airSettle==null?100:e.airSettle;let landed=0;\nwhile(extra<e.airMax){const w=(u[11]>>3)&15;if(w>0){landed++;if(landed>settle)break}else landed=0;\nu=new Uint8Array(n(h,{up:!!(am&1),right:!!(am&2),down:!!(am&4),left:!!(am&8),reset:false}));f++;extra++;\nif(u[11]&2){fin=u[12]|u[13]<<8|u[14]<<16;break}\nif(minY>-1e8&&new DataView(u.buffer).getFloat32(18,true)<minY){dead=true;break}}}\nif(!e.fromCommit)t.ccall(\"deleteCarModel\",\"void\",[\"number\"],[id]);\nout.push({frames:f,fin:fin,dead:dead,crashed:crashed,last:dec(u,f),smp:smp,extra:extra,fc:crossed?fc:0})}\npostMessage({__vt:\"eval\",id:e.id,results:out})}(r);break;\n";
@@ -893,7 +1124,7 @@ window.__ptSolver = __ptSolverMod;
   PT.mapUrl = (url) => (String(url).includes('simulation_worker') ? buildPatchedWorkerUrl(url) : url);
 
   // ================= 2. 时钟推进器(没开自动驾驶时,把真实时间喂给虚拟时钟) =================
-  const S = { driving: false, solving: false, cancel: false, drive: null };
+  const S = { driving: false, solving: false, cancel: false, drive: null, guideOn: (() => { try { return localStorage.getItem('ptai:guide') !== '0'; } catch { return true; } })(), guideStart: null };
   const primaryIdx = () => { for (let i = PT.meta.length - 1; i >= 0; i--) { const m = PT.meta[i]; if (m.realtime === true && !m.ours && m.creates.length > 0) return i; } return -1; };
   {
     let last = performance.now(), acc = 0, pending = false;
@@ -939,7 +1170,7 @@ window.__ptSolver = __ptSolverMod;
   }
   const cacheKey = (id) => 'ptai1:' + id;
   // 内置方案:随扩展一起发的"已验证回放"(只是按键翻转帧,不含任何游戏文件),按赛道指纹索引。由 scripts/bundle_plan.mjs 写入 extension/plans/bundled.json,构建时内联。
-  const BUNDLED = {"53689afa-227":{"name":"slalom (自定义)","finishFrames":15604,"toggles":[[0,3280,3320,3920,3960,4040,4080,4480,4520,5640,5680,5920,5960,6160,6200,6760,6840,7720,7760,7840,7880,8080,8120,8640,8680,8760,8800,9320,9360,9600,9640,10000,10040,10400,10440,10600,10640,11400,11440],[80,120,320,400,2120,2160,2960,3080,3240,3280,3520,3560,3640,3720,3800,3920,4120,4160,4320,4360,4400,4480,4520,4680,4840,5000,5200,5240,5320,5400,5960,6000,6080,6120,6440,6480,6840,6920,6960,7040,7120,7160,7200,7480,7520,7560,7600,7680,7880,8000,8040,8080,8120,8200,8240,8280,8400,8480,8520,8560,8600,8640,9000,9040,9080,9120,9160,9200,9520,9560,9760,9800,9840,9920,9960,10000,10640,10760,10800,10920,10960,11040,11120,11200,11280,11400,11440,11480,11520,11560,11600,11680,11720,11800,11840,11960,12440,12520,13160,13200,13320,13440,13480,13560,13720,13815,13859,13920,14000,14040,14080,14120,14260,14360,14560,14660],[3280,3320,3920,3960,4040,4080,4480,4520,5640,5680,5920,5960,6160,6200,6760,6840,7720,7760,7840,7880,8080,8120,8640,8680,8760,8800,9320,9360,9600,9640,10000,10040,10400,10440,10600,10640,11400,11440],[40,80,200,240,440,480,1840,1880,2000,2040,2480,2520,2560,2600,2640,2680,2800,2840,3200,3240,3360,3480,3560,3600,3960,4000,4080,4120,4200,4240,4280,4320,4360,4400,4680,4720,5040,5080,5160,5200,5280,5320,5400,5520,5560,5640,5720,5880,6000,6080,6120,6160,6200,6360,6400,6440,6480,6600,6680,6760,7480,7520,7680,7720,7760,7840,8000,8040,8360,8400,8680,8760,8800,9000,9040,9080,9280,9320,9360,9400,9440,9520,9560,9600,9680,9760,9800,9840,9920,9960,10040,10280,10320,10400,10520,10600,11480,11520,11800,11840,11960,12000,12040,12080,12160,12280,12320,12360,12400,12440,12520,12600,12680,12920,12960,13000,13040,13160,13200,13320,13560,13640,13815,13859,13920,13960,14360,14460],[]],"recording":"eNrFU7ERwjAMlB3gKBggJRW4oMgC3DGCSjooUlBSULjMABSM4A1oGSElIzACJSWxFDsSGYCcT6e8pZf0StYQn-cCHMDeRosQ7c1Ee5xE-yakJVvZGHAuhkjG5yKXfc46mcEGQj50exHpnfOYRX9ZgE9hnI7p-FSIb3OtkE4r4ivRzC41gCKAGUrTO4y3VMVpfkcgCjyPIw9XaUe5je05vR4HdS2ZhSn-RT03tn_NDN2wB4ANwFY3dgWoqYfOrv6x00YolklwOiCPkW5eEHohNSOoxXR6cbtRDGqdw2h3QZfmsKf9_a6C2GlplCbS-dk1ap_tWzSWRS7NMLvTnTvNlhmkXJ7A7uqePgNebk3_8hf5vWTK","addedAt":"2026-11-11"},"8ede9706-1690":{"name":"Summer 1","finishFrames":26961,"toggles":[[0,3400,3440,6540,6580,6620,6660,6700,6780,9650,9690,9930,9970,10090,10170,10370,10450,10610,10640,10720,10760,10840,10880,10920,10960,11080,11120,11440,11480,11520,11560,11600,11640,11760,11840,12320,12360,12400,12440,12480,12560,12890,12930,13050,13090,13330,13370,13530,13570,14930,14970,15310,15390,15590,15630,15670,15710,15750,15870,16110,16150,16190,16270,16310,16350,16430,16470,16910,16950,17070,17110,19330,19370,20530,20570,20690,20770,20930,20970,21010,21090,21130,21170,21210,21290,21370,21410],[0,120,280,320,360,400,440,480,520,560,720,760,800,880,920,960,1280,1320,1440,1520,1600,1640,1680,1720,1880,1960,2120,2320,3120,3160,3680,3720,3800,3840,4120,4280,4320,4440,4480,4520,4720,4760,6660,6700,6820,6860,7620,7660,7820,7940,7980,8020,8580,8620,8940,8970,9290,9330,9490,9650,9690,9810,9850,9930,9970,10090,10250,10290,10490,10610,10640,10680,10880,10920,10960,11080,11120,11200,11240,11440,11480,11520,11560,11600,11640,11680,11840,12200,12240,12320,12360,12400,12440,12480,12560,12650,12730,12810,12850,12890,12930,12970,13010,13050,13130,13330,13370,13530,13570,13650,13690,13930,13970,14010,14050,14290,14330,14450,14490,14610,14650,14810,14890,14930,14970,15010,15050,15130,15170,15210,15270,15310,15390,15430,15470,15510,15710,15750,15990,16070,16150,16190,16270,16310,16350,16390,16470,16750,16790,16910,16950,17070,17110,17150,17190,17750,17830,17930,18010,18050,18210,18530,18570,18690,19370,19490,20450,20490,20770,20810,20890,20930,21090,21130,21410,21490,21810,21890,21930,22010,22050,22130,22210,22290,22330,22370,22410,22530,22570,22650,22690,22730,22850,22930,23050,23090,23410,23490,23680,23760,23800,23840,23920,24040,24080,24280,24320,24400,24440,24480,24520,24560,24586,24599,24600,24800,24840,24880,25000,25080,25120,25240,25281,25285,25400,25480,25520,25573,25577,25645,25820,26020,26110,26600],[3400,3440,6540,6580,6620,6660,6700,6780,9650,9690,9930,9970,10090,10170,10370,10450,10610,10640,10720,10760,10840,10880,10920,10960,11080,11120,11440,11480,11520,11560,11600,11640,11760,11840,12320,12360,12400,12440,12480,12560,12890,12930,13050,13090,13330,13370,13530,13570,14930,14970,15310,15390,15590,15630,15670,15710,15750,15870,16110,16150,16190,16270,16310,16350,16430,16470,16910,16950,17070,17110,19330,19370,20530,20570,20690,20770,20930,20970,21010,21090,21130,21170,21210,21290,21370,21410],[200,240,880,920,1240,1280,1360,1440,1520,1560,1800,1840,2080,2120,2360,2480,2520,2560,2640,2760,2800,2840,2880,2920,3000,3040,3280,3360,3440,3480,3560,3680,4080,4120,4440,4480,4520,4600,6580,6620,6780,6820,7140,7180,7660,7780,8100,8140,8180,8260,8300,8380,8460,8580,8620,8660,8820,8940,9130,9290,9330,9410,9450,9490,9810,9850,10210,10250,10680,10720,11680,11720,12200,12240,12810,12850,13090,13130,13650,13690,13930,13970,14010,14050,14450,14490,14610,14650,15010,15050,15630,15670,16070,16110,16750,16790,17930,17970,18530,18570,18690,18810,19170,19290,19970,20010,20290,20450,20490,20530,20570,20650,20810,20850,21330,21370,22010,22050,22730,22770,22970,23050,23170,23250,23490,23530,24280,24320,24400,24440,24560,24586,24599,24600,24800,24840,24880,24920,25240,25280,25320,25360],[]],"recording":"eNrtVK1OBDEQnvaW3CZwnhByQS4OA4IgTpwgqAoCyWnECRyISiSK3CNUIghYBCHIfYzTJ8hKJO3Mtp22yxuwaSbT2a_fdP56De47n0ADsL_jZFgK4GTbKR1uNVpalAZgikrjZeMxVs5EwhPOrkXOfyHiKfJi6NeWk5ei95hRdYyBK--M7aV28rGK3k1xinTabjAPmsGyVR6fiUiuUiS5szc_GDlLLePBXdFTaY-nAG_H0fgje56AOZK9x6n3ayDhUV43nlNjjRqWQI5s_4hxKfIU0XZRhMn_trx2rJoNJP0TpBlyQcpZUaPWk6ihllOY0ow_JM3-vfF4w0r2LJ38GvUVaRiGLArB3J0qMqDTy1AnhBGw-mfaopqFk4W_BzABEGmxQk0PASqAO285xu0c4A3xtjQbAVf_Uwzw5B09yBgCL1yXSl1UJ2vIrOssZiWS5FjjxziGTHabIp1iwjU0mzWNHWKGXhUaw1eU1KWU9lMZ71_LfNBWLHXEMJfRTjm5r-J7onEtRT8R_HUKN6ftmjEQsvXhKH-Hb5k8RGVLZ01lv19VWKss","addedAt":"2026-11-11"}};
+  const BUNDLED = {"53689afa-227":{"name":"slalom (自定义)","finishFrames":15604,"toggles":[[0,3280,3320,3920,3960,4040,4080,4480,4520,5640,5680,5920,5960,6160,6200,6760,6840,7720,7760,7840,7880,8080,8120,8640,8680,8760,8800,9320,9360,9600,9640,10000,10040,10400,10440,10600,10640,11400,11440],[80,120,320,400,2120,2160,2960,3080,3240,3280,3520,3560,3640,3720,3800,3920,4120,4160,4320,4360,4400,4480,4520,4680,4840,5000,5200,5240,5320,5400,5960,6000,6080,6120,6440,6480,6840,6920,6960,7040,7120,7160,7200,7480,7520,7560,7600,7680,7880,8000,8040,8080,8120,8200,8240,8280,8400,8480,8520,8560,8600,8640,9000,9040,9080,9120,9160,9200,9520,9560,9760,9800,9840,9920,9960,10000,10640,10760,10800,10920,10960,11040,11120,11200,11280,11400,11440,11480,11520,11560,11600,11680,11720,11800,11840,11960,12440,12520,13160,13200,13320,13440,13480,13560,13720,13815,13859,13920,14000,14040,14080,14120,14260,14360,14560,14660],[3280,3320,3920,3960,4040,4080,4480,4520,5640,5680,5920,5960,6160,6200,6760,6840,7720,7760,7840,7880,8080,8120,8640,8680,8760,8800,9320,9360,9600,9640,10000,10040,10400,10440,10600,10640,11400,11440],[40,80,200,240,440,480,1840,1880,2000,2040,2480,2520,2560,2600,2640,2680,2800,2840,3200,3240,3360,3480,3560,3600,3960,4000,4080,4120,4200,4240,4280,4320,4360,4400,4680,4720,5040,5080,5160,5200,5280,5320,5400,5520,5560,5640,5720,5880,6000,6080,6120,6160,6200,6360,6400,6440,6480,6600,6680,6760,7480,7520,7680,7720,7760,7840,8000,8040,8360,8400,8680,8760,8800,9000,9040,9080,9280,9320,9360,9400,9440,9520,9560,9600,9680,9760,9800,9840,9920,9960,10040,10280,10320,10400,10520,10600,11480,11520,11800,11840,11960,12000,12040,12080,12160,12280,12320,12360,12400,12440,12520,12600,12680,12920,12960,13000,13040,13160,13200,13320,13560,13640,13815,13859,13920,13960,14360,14460],[]],"recording":"eNrFU7ERwjAMlB3gKBggJRW4oMgC3DGCSjooUlBSULjMABSM4A1oGSElIzACJSWxFDsSGYCcT6e8pZf0StYQn-cCHMDeRosQ7c1Ee5xE-yakJVvZGHAuhkjG5yKXfc46mcEGQj50exHpnfOYRX9ZgE9hnI7p-FSIb3OtkE4r4ivRzC41gCKAGUrTO4y3VMVpfkcgCjyPIw9XaUe5je05vR4HdS2ZhSn-RT03tn_NDN2wB4ANwFY3dgWoqYfOrv6x00YolklwOiCPkW5eEHohNSOoxXR6cbtRDGqdw2h3QZfmsKf9_a6C2GlplCbS-dk1ap_tWzSWRS7NMLvTnTvNlhmkXJ7A7uqePgNebk3_8hf5vWTK","addedAt":"2026-11-11"},"8ede9706-1690":{"name":"Summer 1","finishFrames":26961,"toggles":[[0,3400,3440,6540,6580,6620,6660,6700,6780,9650,9690,9930,9970,10090,10170,10370,10450,10610,10640,10720,10760,10840,10880,10920,10960,11080,11120,11440,11480,11520,11560,11600,11640,11760,11840,12320,12360,12400,12440,12480,12560,12890,12930,13050,13090,13330,13370,13530,13570,14930,14970,15310,15390,15590,15630,15670,15710,15750,15870,16110,16150,16190,16270,16310,16350,16430,16470,16910,16950,17070,17110,19330,19370,20530,20570,20690,20770,20930,20970,21010,21090,21130,21170,21210,21290,21370,21410],[0,120,280,320,360,400,440,480,520,560,720,760,800,880,920,960,1280,1320,1440,1520,1600,1640,1680,1720,1880,1960,2120,2320,3120,3160,3680,3720,3800,3840,4120,4280,4320,4440,4480,4520,4720,4760,6660,6700,6820,6860,7620,7660,7820,7940,7980,8020,8580,8620,8940,8970,9290,9330,9490,9650,9690,9810,9850,9930,9970,10090,10250,10290,10490,10610,10640,10680,10880,10920,10960,11080,11120,11200,11240,11440,11480,11520,11560,11600,11640,11680,11840,12200,12240,12320,12360,12400,12440,12480,12560,12650,12730,12810,12850,12890,12930,12970,13010,13050,13130,13330,13370,13530,13570,13650,13690,13930,13970,14010,14050,14290,14330,14450,14490,14610,14650,14810,14890,14930,14970,15010,15050,15130,15170,15210,15270,15310,15390,15430,15470,15510,15710,15750,15990,16070,16150,16190,16270,16310,16350,16390,16470,16750,16790,16910,16950,17070,17110,17150,17190,17750,17830,17930,18010,18050,18210,18530,18570,18690,19370,19490,20450,20490,20770,20810,20890,20930,21090,21130,21410,21490,21810,21890,21930,22010,22050,22130,22210,22290,22330,22370,22410,22530,22570,22650,22690,22730,22850,22930,23050,23090,23410,23490,23680,23760,23800,23840,23920,24040,24080,24280,24320,24400,24440,24480,24520,24560,24586,24599,24600,24800,24840,24880,25000,25080,25120,25240,25281,25285,25400,25480,25520,25573,25577,25645,25820,26020,26110,26600],[3400,3440,6540,6580,6620,6660,6700,6780,9650,9690,9930,9970,10090,10170,10370,10450,10610,10640,10720,10760,10840,10880,10920,10960,11080,11120,11440,11480,11520,11560,11600,11640,11760,11840,12320,12360,12400,12440,12480,12560,12890,12930,13050,13090,13330,13370,13530,13570,14930,14970,15310,15390,15590,15630,15670,15710,15750,15870,16110,16150,16190,16270,16310,16350,16430,16470,16910,16950,17070,17110,19330,19370,20530,20570,20690,20770,20930,20970,21010,21090,21130,21170,21210,21290,21370,21410],[200,240,880,920,1240,1280,1360,1440,1520,1560,1800,1840,2080,2120,2360,2480,2520,2560,2640,2760,2800,2840,2880,2920,3000,3040,3280,3360,3440,3480,3560,3680,4080,4120,4440,4480,4520,4600,6580,6620,6780,6820,7140,7180,7660,7780,8100,8140,8180,8260,8300,8380,8460,8580,8620,8660,8820,8940,9130,9290,9330,9410,9450,9490,9810,9850,10210,10250,10680,10720,11680,11720,12200,12240,12810,12850,13090,13130,13650,13690,13930,13970,14010,14050,14450,14490,14610,14650,15010,15050,15630,15670,16070,16110,16750,16790,17930,17970,18530,18570,18690,18810,19170,19290,19970,20010,20290,20450,20490,20530,20570,20650,20810,20850,21330,21370,22010,22050,22730,22770,22970,23050,23170,23250,23490,23530,24280,24320,24400,24440,24560,24586,24599,24600,24800,24840,24880,24920,25240,25280,25320,25360],[]],"recording":"eNrtVK1OBDEQnvaW3CZwnhByQS4OA4IgTpwgqAoCyWnECRyISiSK3CNUIghYBCHIfYzTJ8hKJO3Mtp22yxuwaSbT2a_fdP56De47n0ADsL_jZFgK4GTbKR1uNVpalAZgikrjZeMxVs5EwhPOrkXOfyHiKfJi6NeWk5ei95hRdYyBK--M7aV28rGK3k1xinTabjAPmsGyVR6fiUiuUiS5szc_GDlLLePBXdFTaY-nAG_H0fgje56AOZK9x6n3ayDhUV43nlNjjRqWQI5s_4hxKfIU0XZRhMn_trx2rJoNJP0TpBlyQcpZUaPWk6ihllOY0ow_JM3-vfF4w0r2LJ38GvUVaRiGLArB3J0qMqDTy1AnhBGw-mfaopqFk4W_BzABEGmxQk0PASqAO285xu0c4A3xtjQbAVf_Uwzw5B09yBgCL1yXSl1UJ2vIrOssZiWS5FjjxziGTHabIp1iwjU0mzWNHWKGXhUaw1eU1KWU9lMZ71_LfNBWLHXEMJfRTjm5r-J7onEtRT8R_HUKN6ftmjEQsvXhKH-Hb5k8RGVLZ01lv19VWKss","addedAt":"2026-11-11"},"95a8a6cc-3151":{"name":"Summer 3","finishFrames":24858,"toggles":[[0,3360,3400,3440,3480,4200,4240,4960,5000,5080,5160,5280,5360,5720,5800,5960,6000,6440,6480,7320,7360,8440,8480,8800,8840,9040,9080,9200,9240,9280,9320,9400,9440,9680,9720,10200,10240,10600,10640,11520,11600,11640,11680,12240,12280,12440,12480,13000,13040,14360,14560,15520,15600,18640,18680,21200,21240,21720,21760,24600,24840],[80,160,200,240,280,320,720,760,1440,1480,2480,2520,2640,2680,2840,2880,2960,3000,3400,3440,3560,3640,3680,3760,3840,3920,4000,4040,4080,4120,4240,4320,4440,4480,4640,4680,5520,5600,5800,5840,5880,5920,6360,6400,7280,7320,7520,7560,8080,8240,8280,8360,9160,9200,9240,9280,9480,9520,9720,9840,9960,10040,10120,10200,10720,10760,10880,10960,11080,11120,11360,11400,11720,11760,12320,12360,12400,12440,12480,12560,12640,12800,12840,13000,13040,13080,13120,13240,13280,13360,13400,13440,13520,13600,13680,13720,14120,14200,15600,15640,16040,16080,16440,16520,16800,16880,17960,18000,18280,18360,18400,18440,18680,18800,18880,19040,19160,19200,19440,19480,19520,19560,19640,19680,20040,20080,21120,21160,21320,21360,21520,21640,21680,21720,21760,22080,22160,22200,22240,22280,22320,22440,22480,22560,22600,22640,22680,22760,22800,22840,22920,22960,23040,23080,23160,23200,23280,23360,23400,23440,23480,23520,23720,23820,23920,24020,24360,24600],[3360,3400,3440,3480,4200,4240,4960,5000,5080,5160,5280,5360,5720,5800,5960,6000,6440,6480,7320,7360,8440,8480,8800,8840,9040,9080,9200,9240,9280,9320,9400,9440,9680,9720,10200,10240,10600,10640,11520,11600,11640,11680,12240,12280,12440,12480,13000,13040,14360,14560,15520,15600,18640,18680,21200,21240,21720,21760,24600,24840],[0,40,240,280,760,800,920,960,1240,1320,1920,1960,2040,2120,2160,2200,2400,2480,2520,2560,2600,2640,3040,3120,3160,3240,3320,3360,3800,3840,4320,4360,4600,4640,4680,4720,4800,4840,4880,4920,5000,5080,5160,5280,5400,5520,5680,5720,5840,5880,6000,6040,6120,6160,6200,6360,6400,6440,6480,6600,6640,6760,6800,6840,7000,7280,7400,7520,7560,7640,7680,7720,7840,8000,8040,8080,8360,8400,8480,8520,8640,8720,9080,9120,9600,9680,9840,9880,10080,10120,10960,11000,11040,11080,11200,11240,11320,11360,11440,11520,11680,11720,11760,11800,11840,11880,12000,12120,12160,12200,12360,12400,12560,12600,12800,12840,13440,13520,13800,13920,13960,14120,15840,15960,16080,16160,16240,16320,16360,16440,16520,16600,16640,16800,16960,17000,17080,17120,17200,17280,17320,17400,17440,17520,17760,17840,18040,18120,18160,18280,18360,18400,18600,18640,19040,19120,19240,19320,19600,19640,19680,19720,19840,19960,20080,20120,20200,20240,20440,20480,20640,20720,21000,21040,21080,21120,21240,21280,21480,21520,21640,21680,22080,22120,22200,22240,22280,22320,22760,22800,23440,23480,23520,23620,24120,24360],[]],"recording":"eNrVVKFywzAMtZt2111vd4OBhYGDA9tdYaHBwD5goHBQcJ-QTzDsJwQODBgWDgYOBuwDZkuRrcj9geV079Jalp70pDyb9OzvTGdmu6wKOjRAPNmEHn0Gm_DYJHxcJzzgPwFPwZRoDnFCHNHnhPjezEfRHjAXRd7ie7dJoT7RZ9ylf75vS4R2lwKemV4nrEeHMwb5aQoZL8iQD_BPJyzHAS483z0imSB8Bi4kFx7J50T7pngGRuDIZFSszEWNomZSW2Qnc__9kmonyMtaepQMNqVqErFFJOHovePswFkkHyklyXe_LjT8UvGD1aIohoptjep67Nsb24tNlJ7-58R-4a7lpKMtqUmF15XuQLg24apRVBpFm641WU4FsHlRuBKoni4QR5EqVFdA3GptOcpCEMMsRzBFjnpI5KirQYIlSRktds8xPToabvTGqQXxyy-Dq0ZxMvPWy3Jyxnm_zJxX8ZQVBU5Xe6oh7K3WjvT94K9B3IJf3IL4_AEQGKAa","addedAt":"2026-11-15"},"68b0e957-3050":{"name":"Summer 6","finishFrames":47655,"toggles":[[0,5340,5700,8760,9000,9180,9360,14100,14220,14940,15300,16860,17040,18480,18660,18720,18780,24300,24600,24720,25020,26700,26820,27120,27180,27360,27660,30840,31140,31740,31860,32160,32340,34140,34200,41880,41940,42180,42240,44040,44100,44260,44396],[2220,2580,4020,4380,4560,5340,5880,6180,12840,13080,15900,16020,17040,17940,18120,18480,18660,18720,20160,20340,22320,22860,25020,25560,30060,30120,31140,31560,33960,34140,35760,35940,36300,36960,37920,38640,41760,41880,41940,42180,42360,42540,43080,43140,43740,43839,43847,44040,44100,44260,44396,44400,45672,45725,46380,46860],[5340,5700,8760,9000,9180,9360,14100,14220,14940,15300,16860,17040,18480,18660,18720,18780,24300,24600,24720,25020,26700,26820,27120,27180,27360,27660,30840,31140,31740,31860,32160,32340,34140,34200,41880,41940,42180,42240,44040,44100,44260,44396],[660,720,2640,3000,4380,4560,5700,5760,6180,6960,7200,7260,7620,7860,8100,8760,9000,9180,9360,9600,10320,11220,11640,12540,13080,13860,14220,14940,15300,15660,18900,19020,19080,19260,19500,19680,20640,22140,22860,23460,23760,24300,25560,25740,27180,27360,28500,28980,29160,29400,29460,30060,30120,30300,30540,30840,31560,31740,32340,33960,34200,35760,35940,36300,36960,37920,38640,38880,39540,39720,41640,41760,43320,43740,45000,45540,45660,45672,45725,45900,47174,47273,47400,47580],[]],"recording":"eNrFUSFOA0EUfTs73V3SNRBIGtJwAKjAkCD2GBWVTUBUIBCIOhArcFT0ABUIBAlmJQJuwAEqegDECgRpELz3Z7cVHIDJ5Gfmzfv_v__mBFrLfUwifHVRA5Xtcg9T4MMJ7yVCFh3FwvbsAINIBMZZ0hwKS-ThKlccuQYnmKV6xZFibRUCsgDugXPgOVMjtpgYP4_Rd8r1h-L7rkr9xChjvQZO0Up6TUW-zhTnu8LJfIww3tHrMGlS5g5vsSY6zVUtKAnDMpFXCr6gMOAdW20e-PY4Ax4cVhGO_9urITQIr3ep2l1aoxsvhCPTt5DCp9rSSd7orE1kaeaU5jD5ZAbl3E-tM1VrDh1bdkQY2Xcw5dNvB2TfVdSQg4Gb3IGVrQzkFxDp_fmIIK-yWaZGoDDW75sbOWT7C7D2-pdbq8z1C1v7cf8","addedAt":"2026-11-15"},"34211fb8-1808":{"name":"Winter 1","finishFrames":19547,"toggles":[[0,4800,4840,5200,5240,5760,5800,6760,6800,6880,6920,7040,7080,7680,7720,7920,7960,8200,8360,8520,8600,8880,8920,9120,9160,11320,11360,11640,11680,11760,11800,11920,11960,12120,12160,12240,12280,12760,12800,14040,14080,14160,14200,14280,14289,14520,14560,15164,15195],[80,120,280,320,440,480,520,560,640,720,800,880,1400,1440,1560,1640,2200,2240,3600,3640,3920,3960,4240,4320,4440,4520,4560,4600,4760,4800,4840,5000,5160,5200,5240,5320,5360,5400,5440,5600,5640,5760,5880,5920,6160,6200,6440,6480,6560,6680,6720,6760,7000,7040,7200,7280,7440,7640,7720,7800,7840,7920,8000,8200,8360,8520,8680,8760,8800,8880,8920,9120,9160,9320,9360,9720,9760,9800,9840,9880,10040,10200,10240,10440,10520,10600,10920,10960,11000,11040,11200,11240,11440,11480,11560,11600,11800,11840,11880,11920,11960,12120,12160,12240,12280,12360,12400,12560,12600,12760,12800,12880,12920,12960,13000,13040,13080,13800,13840,13920,13960,14040,14200,14280,14289,14332,14400,14480,14560,14600,14612,14629,14640,15040,15080,15164,15195,15480,15560,16038,16065,16240,16280,16400,16440,16600,16680,16760,16800,16920,16975,17000,17040,17120,17240,17280,17320,17360,17640,17674,18080,18160,18200,18240],[4800,4840,5200,5240,5760,5800,6760,6800,6880,6920,7040,7080,7680,7720,7920,7960,8200,8360,8520,8600,8880,8920,9120,9160,11320,11360,11640,11680,11760,11800,11920,11960,12120,12160,12240,12280,12760,12800,14040,14080,14160,14200,14280,14289,14520,14560,15164,15195],[0,80,120,240,1080,1200,1760,1800,2080,2120,2280,2320,2960,3000,3640,3680,3800,3840,3880,3920,4080,4120,4160,4200,4400,4440,4600,4640,5120,5160,5400,5440,5600,5640,5800,5880,5960,6160,6240,6360,6480,6560,6960,7000,7080,7200,7280,7360,7800,7840,7960,8000,9320,9360,11240,11280,11520,11560,11840,11880,12960,13000,13800,13840,14332,14360,14480,14520,14600,14612,14629,14640,15480,15535,16038,16065,16240,16280,16760,16800,16920,16975,17400,17440,17836,17871,17955,17985],[]],"recording":"eNrNU6FSA0EMfXulQztgqIIBCgNmZzBFgUQgKlcgTvQDKpEn-QAECr0Cg8IiK08iUUwdBnEOy24y2c11f4BO5k0mmyYveblLxN9qAgssTcRRFXE1iOgQsSGsKd6S3wGeLCTsmxy_H0XkiP6vR46s6fVzK0cCjoFv8hcVToAXefKqiJXkZEy1IX9GvhtmAgGdvFpVzQp5q1jZfrtGxkzoFI1Okh1hK3wSvVZaeBVPW-IuvG1bUErVbswmsbYotZGge_kiru2j6uV7UeECuFXj7AJ7wA7wRGTuENU5psV-GRwCb32VndL9CjgoVse6nAHPJrOa_b8LrOm7SBXmg4h8Y1ycCz5UGZtCDluIzq27vkDpZpzcnpOFpwMO9m5UF7rzejtXY1bXNNQpre7H4EjynZIyzBKk-VXyrU2W7JX8R4NzkntKe_gD5v5zKA","addedAt":"2026-11-15"}};
   const loadLocal = (id) => { try { return JSON.parse(localStorage.getItem(cacheKey(id)) || 'null'); } catch { return null; } };
   /** 本地缓存与内置方案里取更快的那个(都要求已通过 Verify;没有 verified 标记的本地方案也保留,但排在内置之后) */
   const loadPlan = (id) => {
@@ -991,6 +1222,20 @@ window.__ptSolver = __ptSolverMod;
   }
 
   // ================= 6. 自动驾驶 =================
+  // 引导线用的"前方轨迹":方案是确定性的,在评估引擎里整圈跑一遍(每 GUIDE_STEP 帧采一个状态)就知道车接下来会走哪;按方案缓存在内存里
+  const guideCache = new Map();
+  async function prepareGuide(plan) {
+    const key = plan.recording || (plan.finishFrames + ':' + JSON.stringify(plan.toggles).length);
+    if (guideCache.has(key)) return guideCache.get(key);
+    const src = primaryIdx(); if (src < 0) throw new Error('游戏还没准备好');
+    const g = makeG(src); await g.makePool(1);
+    try {
+      const masks = SOLVER.togglesToMasks(plan.toggles, plan.finishFrames + 60);
+      const [r] = await g.evalBatch([Array.from(masks)], { seg: 1, tail: 1, maxFrames: masks.length + 200, sampleEvery: GUIDE.GUIDE_STEP });
+      const pts = r.smp.slice(); if (r.last && (!pts.length || pts[pts.length - 1][0] < r.last[0])) pts.push(r.last);
+      const path = GUIDE.buildGuidePath(pts, masks); guideCache.set(key, path); return path;
+    } finally { for (const p of PT.pool) p.w.terminate(); PT.pool = []; }
+  }
   const KEYMAP = { up: ['KeyW', 'w'], right: ['KeyD', 'd'], down: ['KeyS', 's'], left: ['KeyA', 'a'], reset: ['KeyR', 'r'] };
   // 注入的按键带 __ptai 标记:自动驾驶期间的输入锁靠它区分"自己发的"和"玩家按的"
   const fireKey = (type, code, key) => { const ev = new KeyboardEvent(type, { code, key, bubbles: true, cancelable: true }); ev.__ptai = true; window.dispatchEvent(ev); };
@@ -1005,6 +1250,9 @@ window.__ptSolver = __ptSolverMod;
       // 玩家可能正按住某个键:先全松一次,清掉游戏侧残留的"按下"状态,免得锁了输入后卡在按下
       for (const k of Object.keys(KEYMAP)) press(k, false);
       let w = primaryIdx(); if (w < 0) throw new Error('游戏还没准备好');
+      const guideFor = async () => { try { return await prepareGuide(plan); } catch (e) { ui.log('引导线不可用:' + String(e.message).slice(0, 80)); return null; } };
+      let guidePath = null;
+      if (S.guideOn && GUIDE && GUIDEUI) { ui.status('自动驾驶:生成引导线…'); guidePath = await guideFor(); w = primaryIdx(); }
       let p0 = PT.peek(w);
       if (p0 && (p0.started || p0.frames > 0)) { // 已经开过:T = 回到起点重来(新建一辆车)
         const n0 = PT.meta[w].creates.length;
@@ -1025,6 +1273,9 @@ window.__ptSolver = __ptSolverMod;
         if (PT.peek(w)?.started) break;
       }
       if (!PT.peek(w)?.started) throw new Error('车没有起步(游戏没有响应键盘事件)');
+      const guideFrames = () => PT.peek(w)?.frames ?? null;
+      if (guidePath) GUIDEUI.start(guidePath, guideFrames);
+      S.guideStart = async () => { guidePath ??= await guideFor(); if (guidePath) GUIDEUI.start(guidePath, guideFrames); }; // 驾驶途中才打开"引导线"开关时用
       const t0 = performance.now() - frames(); const endFrame = plan.finishFrames + 1500; let lastUi = 0;
       for (;;) {
         if (ctl.stop) { ui.log('已停止:交还给你'); break; }
@@ -1043,7 +1294,7 @@ window.__ptSolver = __ptSolverMod;
         const now = performance.now(); if (now - lastUi > 120) { lastUi = now; ui.drive(frames(), plan.finishFrames); }
       }
       return { finished: null };
-    } finally { releaseAll(); S.driving = false; S.drive = null; ui.keys(null); }
+    } finally { releaseAll(); S.driving = false; S.drive = null; S.guideStart = null; ui.keys(null); if (GUIDEUI) GUIDEUI.stop(); }
   }
 
   // ================= 7. 面板 =================
@@ -1058,6 +1309,7 @@ window.__ptSolver = __ptSolverMod;
       .t small{font-weight:400;opacity:.6}
       button{all:unset;box-sizing:border-box;display:block;width:100%;text-align:center;cursor:pointer;border-radius:8px;padding:8px 0;font-weight:600;font-size:14px;background:#3b82f6;color:#fff}
       button:hover{filter:brightness(1.1)} button.stop{background:#ef4444} button.busy{background:#6b7280}
+      .row button.off{background:#1a2040;color:#7f89bd}
       .row{display:flex;gap:6px;margin-top:6px} .row button{font-size:11px;font-weight:500;padding:4px 0;background:#2a3358}
       .st{margin:6px 0 2px;min-height:17px;color:#ffe08a} .bar{height:4px;border-radius:2px;background:#2a3358;overflow:hidden;margin:4px 0}
       .bar i{display:block;height:100%;width:0;background:#34d399}
@@ -1078,6 +1330,7 @@ window.__ptSolver = __ptSolverMod;
       <div class="st" id="st">待命</div><div class="bar"><i id="bar"></i></div>
       <div class="keys" id="keys"><div class="kr"><div class="kb"><b class="k r off" id="k_reset">R</b><b class="k" id="k_up" style="grid-column:2;grid-row:1">W</b><b class="k" id="k_left" style="grid-column:1;grid-row:2">A</b><b class="k" id="k_down" style="grid-column:2;grid-row:2">S</b><b class="k" id="k_right" style="grid-column:3;grid-row:2">D</b></div><div class="kt" id="kt">&nbsp;</div></div>
         <canvas id="tl" width="244" height="50"></canvas></div>
+      <div class="row"><button id="gd" tabindex="-1">引导线:开</button></div>
       <div class="row"><button id="clr" tabindex="-1">清除本赛道缓存</button><button id="cp" tabindex="-1">复制回放串</button></div>
       <div class="log" id="log"></div>
       <div class="hk" id="hk"></div>
@@ -1206,12 +1459,19 @@ window.__ptSolver = __ptSolverMod;
       } catch (e) { ui.status('出错:' + e.message); ui.log('出错: ' + e.message); sticky = { id: curTrackId(), text: '出错:' + e.message }; }
       finally { running = false; ui.busy('idle'); }
     };
+    const paintGd = () => { const b = ui.$('gd'); b.textContent = '引导线:' + (S.guideOn ? '开' : '关'); b.classList.toggle('off', !S.guideOn); };
+    paintGd();
+    ui.$('gd').addEventListener('click', () => {
+      S.guideOn = !S.guideOn; try { localStorage.setItem('ptai:guide', S.guideOn ? '1' : '0'); } catch { /* ignore */ }
+      if (GUIDEUI) GUIDEUI.setEnabled(S.guideOn); if (S.guideOn && S.driving && S.guideStart) S.guideStart(); paintGd();
+    });
+    if (GUIDEUI) GUIDEUI.setEnabled(S.guideOn);
     ui.$('go').addEventListener('click', () => trigger());
     installHotkeys(ui, () => trigger());
     installInputLock();
     ui.$('clr').addEventListener('click', () => { const id = curTrackId(); if (id) { clearPlan(id); ui.log('已清除本赛道缓存'); } });
     ui.$('cp').addEventListener('click', async () => { const id = curTrackId(); const p = id && loadPlan(id); if (!p) { ui.log('本赛道还没有方案'); return; } try { await navigator.clipboard.writeText(p.recording); ui.log('回放串已复制'); } catch { ui.log('复制失败(浏览器不允许)'); } });
-    window.__ptai = { PT, S, solve: (o) => solve(ui, o), drive: (p) => drive(p, ui), loadPlan, savePlan, curTrackId, primaryIdx, ui };
+    window.__ptai = { PT, S, prepareGuide, solve: (o) => solve(ui, o), drive: (p) => drive(p, ui), loadPlan, savePlan, curTrackId, primaryIdx, ui };
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
