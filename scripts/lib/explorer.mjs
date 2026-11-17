@@ -72,7 +72,7 @@ export async function exploreLap(S, o = {}) {
     for (const smp of r.smp) { const i = Math.round(smp[0] / seg) - 1; if (i < 0 || i >= acts.length) continue; const node = { parent: prev, chunk: Uint8Array.from([acts[i]]), frames: smp[0], last: acts[i], s: 0 }; const got = register(prev, node.chunk, smp); const cell = got ? arch.get(cpKey(smp)) : null; if (cell) node.s = cell.s; prev = cell ? cell.node : node; n += got ? 1 : 0; }
     log(`  [探索] 续跑:沿 ${acts.length} 个动作(${acts.length * seg} 帧)重放,登记 ${n} 个状态,档案 ${arch.size} 格`);
   }
-  const t0 = Date.now(); let iters = 0, simFrames = 0, best = null, firstFinAt = null, newCells = 0, lastLog = 0;
+  const t0 = Date.now(); let iters = 0, simFrames = 0, best = null, firstFinAt = null, newCells = 0, lastLog = 0, lastProg = 0;
   const segs = Array(H).fill(seg), sampleAt = segs.map((_, k) => (k + 1) * seg);
   while (iters < maxIters) {
     if (S.o.cancel?.()) throw new Error('已取消');
@@ -96,6 +96,10 @@ export async function exploreLap(S, o = {}) {
       for (const s of r.smp) { const i = Math.round((s[0] - F) / seg) - 1; if (i < 0 || i >= H || Math.abs(s[0] - F - (i + 1) * seg) > 0) continue; { const got = consider(base, plans[k], i, s); newCells += got ? 1 : 0; if (got) kids++; } }
     }
     if (kids > 0) cell.stale = 0; else cell.stale++;
+    if (o.onProgress && Date.now() - lastProg > 400) { // 进度回调(可选):档案里最远的中线进度 / 中线总长;找到冲线路线后为 1
+      lastProg = Date.now(); let sm = 0; for (const c of arch.values()) if (c.s > sm) sm = c.s;
+      o.onProgress({ stage: 'explore', frac: best ? 1 : Math.max(0, Math.min(0.999, sm / S.prog.length)), iters });
+    }
     if (Date.now() - lastLog > 15000) {
       lastLog = Date.now(); let smax = -Infinity; for (const c of arch.values()) if (c.s > smax) smax = c.s;
       if (o.onFrontier) { let bc = null; for (const c of arch.values()) if (!bc || c.s > bc.s) bc = c; const acts = Array.from(chainOf(bc.node)); o.onFrontier({ committed: acts, durs: acts.map(() => seg), frames: bc.node.frames, last: null, s: bc.s }); } // 定期把"最远进度"那一格的动作链写出去,不用等跑完就能用 diag_fail.mjs 重放

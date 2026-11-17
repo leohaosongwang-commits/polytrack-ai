@@ -23,6 +23,14 @@ test('按键显示:面板里有键帽和时间轴,数据源是物理侧的 ctl,d
   assert.ok(js.includes('ui.keys(plan.toggles, f, p?.ctl ?? 0)') && js.includes('ui.keys(null)'));
 });
 
+test('进度条:求解 / 微调按阶段显示百分比,规划器 / 探索 / 打磨都带可选的进度回调', () => {
+  for (const k of ['function makeProgress(', 'onProgress: (p) => PG.set(p.frac)', "PG.enter('polish')", "PG.enter('verify')", 'PG.done(']) assert.ok(js.includes(k), k);
+  assert.ok(js.includes("this.o.onProgress({ stage: 'plan'") && js.includes("stage: 'polish'") && js.includes("stage: 'explore'"), '三个阶段都要有进度回调');
+  assert.ok(js.includes("ui.wait('对照榜单第 1 名')"), '读榜单是不定长等待');
+  for (const id of ['id="pc"', 'id="pl"', 'id="chips"', 'id="pt"', 'id="trk"', 'id="dot"', 'id="min"', 'id="hd"']) assert.ok(js.includes(id), id); // 百分比 / 阶段名 / 阶段条 / 时间 / 条 / 状态点 / 折叠 / 标题栏
+  assert.ok(js.includes('prefers-reduced-motion'), '尊重系统的"减少动态效果"设置');
+});
+
 test('探索式规划已打进产物,并作为规划失败后的兜底', () => {
   assert.ok(js.includes('async function exploreLap(') && js.includes('exploreLap, polishPlan }'));
   assert.ok(js.includes('window.__ptGuideMath') && js.includes('function projectGuide(') && js.includes('window.__ptGuideUI') && js.includes('prepareGuide'), '引导线(相机钩子 + 叠加层 + 数学)要在产物里');

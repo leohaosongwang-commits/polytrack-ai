@@ -126,38 +126,70 @@
 
   const curTrackId = () => { const i = primaryIdx(); if (i < 0) return null; const m = PT.meta[i]; return hashTrack(m.creates[m.creates.length - 1].trackData); };
 
+  // ================= 4b. 进度条:把几个阶段按权重折成 0~100%,并估计剩余时间 =================
+  // stages: [{ key, label, short(阶段条上的短名), w(权重), dur(按时间走的阶段:总秒数), est(之后才轮到的阶段:估计秒数) }]。
+  // enter(key[, label]):进入阶段(阶段内进度归零,总进度回到该阶段起点);set(frac):阶段内进度 0~1(只增不减);done():全部完成 = 100%。
+  // 剩余时间 = 当前阶段剩余(按时间的阶段:dur - 已用;按比例的阶段:已用 × (1 - f) / f,f < 4% 或不到 6 s 时不估)+ 后面各阶段的 dur / est。
+  function makeProgress(ui, stages) {
+    const sum = stages.reduce((a, x) => a + x.w, 0), t0 = Date.now(), steps = stages.map((x) => x.short ?? x.label);
+    let idx = -1, ts = t0, frac = 0, last = 0;
+    const before = (i) => (100 * stages.slice(0, i).reduce((a, x) => a + x.w, 0)) / sum;
+    const rest = () => {
+      const st = stages[idx], el = (Date.now() - ts) / 1000; let cur;
+      if (st.dur != null) cur = Math.max(0, st.dur - el); else if (frac >= 0.04 && el >= 6) cur = (el * (1 - frac)) / frac; else return null;
+      return cur + stages.slice(idx + 1).reduce((a, x) => a + (x.dur ?? x.est ?? 0), 0);
+    };
+    const paint = (force) => {
+      const now = Date.now(); if (!force && now - last < 150) return; last = now;
+      const st = stages[idx];
+      ui.progress({ pct: Math.min(99.9, before(idx) + ((100 * st.w) / sum) * frac), label: st.label, steps, step: idx, elapsed: (now - t0) / 1000, rest: rest() });
+    };
+    return {
+      enter(key, label) { const i = stages.findIndex((x) => x.key === key); if (i < 0) return; idx = i; frac = 0; ts = Date.now(); if (label) stages[i].label = label; paint(true); },
+      set(f) { if (idx < 0) return; frac = Math.max(frac, Math.max(0, Math.min(1, f))); paint(false); },
+      done(label = '完成') { ui.progress({ pct: 100, label, steps, step: stages.length, elapsed: (Date.now() - t0) / 1000, rest: null }); },
+    };
+  }
+
   // ================= 5. 求解 =================
   async function solve(ui, { polishSeconds = 30 } = {}) {
     const src = primaryIdx(); if (src < 0) throw new Error('游戏还没准备好(先选好赛道、看到起点画面)');
     const id = curTrackId(); const g = makeG(src); const t0 = Date.now();
     const workers = Math.max(2, Math.min(8, (navigator.hardwareConcurrency || 4) - 2));
-    S.solving = true; S.cancel = false;
+    S.solving = true; S.cancel = false; ui.busy('solve');
+    const PG = makeProgress(ui, [ // 权重 = 大致的时间占比;打磨按时间走,规划按"沿中线走了多远 / 中线总长"走
+      { key: 'init', label: '建立赛道势能', short: '准备', w: 3, est: 10 },
+      { key: 'plan', label: '规划路线', short: '规划', w: 72 },
+      ...(polishSeconds > 0 ? [{ key: 'polish', label: '打磨', short: '打磨', w: 20, dur: polishSeconds }] : []),
+      { key: 'verify', label: '游戏 Verify 复核', short: '复核', w: 5, est: 5 },
+    ]);
     try {
-      const solver = new SOLVER.Solver(g, { workers, potential: POTENTIAL, seed: 1, commitN: 6, pop: 96, iters: 3, segs: [...Array(6).fill(40), ...Array(6).fill(100), ...Array(4).fill(240)], log: (m) => ui.log(m), cancel: () => S.cancel, stallRetries: 2, stallTotalMax: 2, slowSegs: null }); // 页面里求解:规划停滞最多重试 2 次,还不行就改用探索式规划(下面),别让人干等
-      ui.status(`求解中:建立赛道势能,启动 ${workers} 个评估线程…`);
+      const solver = new SOLVER.Solver(g, { workers, potential: POTENTIAL, seed: 1, commitN: 6, pop: 96, iters: 3, segs: [...Array(6).fill(40), ...Array(6).fill(100), ...Array(4).fill(240)], log: (m) => ui.log(m), cancel: () => S.cancel, onProgress: (p) => PG.set(p.frac), stallRetries: 2, stallTotalMax: 2, slowSegs: null }); // 页面里求解:规划停滞最多重试 2 次,还不行就改用探索式规划(下面),别让人干等
+      PG.enter('init'); ui.status(`求解中:建立赛道势能,启动 ${workers} 个评估线程…`);
       await solver.init();
-      ui.status('求解中:阶段 A 滚动时域规划(几分钟,期间游戏画面会卡一些)');
+      PG.enter('plan'); ui.status('求解中:阶段 A 滚动时域规划(几分钟,期间游戏画面会卡一些)');
       let A; // 先用滚动时域规划(圈速更好);它停滞 / 失败(新赛道里的墙、环、长跳常见)就改用 Go-Explore 式探索找一条能冲线的路线,后面照样打磨 + Verify
       try { A = await solver.plan(); } catch (e) {
         if (S.cancel || /已取消/.test(e.message)) throw e;
-        ui.log('规划失败:' + e.message.slice(0, 80) + ' → 改用探索式规划'); ui.status('求解中:规划失败,改用探索式规划(最多 10 分钟)');
-        A = await SOLVER.exploreLap(solver, { seconds: 600, log: (m) => ui.log(m) });
+        ui.log('规划失败:' + e.message.slice(0, 80) + ' → 改用探索式规划'); ui.status('求解中:规划失败,改用探索式规划(最多 10 分钟)'); PG.enter('plan', '探索式规划(备用)');
+        A = await SOLVER.exploreLap(solver, { seconds: 600, log: (m) => ui.log(m), onProgress: (p) => PG.set(p.frac) });
       }
       let masks = A.masks, fin = await solver.finishOf(A.masks);
       ui.log(`规划完成: ${fin} 帧 (${(fin / 1000).toFixed(3)} s)`);
       if (polishSeconds > 0 && !S.cancel) {
-        ui.status(`求解中:阶段 B 打磨 ${polishSeconds} s`);
+        PG.enter('polish'); ui.status(`求解中:阶段 B 打磨 ${polishSeconds} s`);
         const P = await solver.polish(masks, fin, { seconds: polishSeconds });
         masks = P.masks; fin = P.finishFrames; ui.log(`打磨完成: ${fin} 帧 (${(fin / 1000).toFixed(3)} s)`);
       }
       const toggles = SOLVER.masksToToggles(masks);
       const recording = await encodeRecordingWeb(toggles);
-      ui.status('求解中:用游戏自带 Verify 复核…');
+      PG.enter('verify'); ui.status('求解中:用游戏自带 Verify 复核…');
       const v = await g.verify(recording, fin, 1); const vm = await g.verify(recording, fin - 1, 1);
       const verified = v[0].result === true && vm[0].result === false;
       const plan = { v: 1, finishFrames: fin, toggles, recording, verified, solvedAt: Date.now(), solveSeconds: Math.round((Date.now() - t0) / 1000) };
       savePlan(id, plan);
       ui.log(`Verify ${verified ? '通过' : '未通过'}(完成帧 ${v[0].result}, 少 1 帧 ${vm[0].result})`);
+      PG.done('求解完成');
       return plan;
     } finally {
       for (const p of PT.pool) p.w.terminate(); PT.pool = []; S.solving = false;
@@ -196,9 +228,13 @@
   /** 榜单第 1 名回放当起点:先过游戏 Verify 并立刻存进缓存,再在页面里微调(预算 polishBudget() 秒),改进过 Verify 后覆盖缓存。返回方案;回放不能用就返回 null */
   async function deriveFromTop(ui, id, src, top, existing) {
     const g = makeG(src); const secs = polishBudget(); const t0 = Date.now();
-    S.solving = true; S.cancel = false; ui.busy('solve'); ui.bar(0);
+    S.solving = true; S.cancel = false; ui.busy('solve');
+    const PG = makeProgress(ui, [
+      { key: 'v1', label: '复核榜单回放', short: '复核回放', w: 6, est: 4 },
+      ...(secs > 0 ? [{ key: 'polish', label: '微调榜单回放', short: '微调', w: 90, dur: secs }, { key: 'v2', label: '复核微调结果', short: '复核结果', w: 4, est: 5 }] : []),
+    ]);
     try {
-      ui.status(`榜单第 1 名 ${secStr(top.frames)}:用游戏自带 Verify 复核它的回放…`);
+      PG.enter('v1'); ui.status(`榜单第 1 名 ${secStr(top.frames)}:用游戏自带 Verify 复核它的回放…`);
       let toggles; try { toggles = await decodeRecordingWeb(top.recording); } catch (e) { ui.log('回放解码失败:' + String(e.message).slice(0, 60)); return null; }
       const v0 = await g.verify(top.recording, top.frames, 1); const v1 = await g.verify(top.recording, top.frames - 1, 1);
       if (!(v0[0].result === true && v1[0].result === false)) { ui.log('这条回放在当前赛道上没通过游戏的 Verify,不用'); return null; }
@@ -207,12 +243,13 @@
       ui.log(`回放通过 Verify:${secStr(top.frames)},已存进缓存`);
       if (secs > 0 && !S.cancel) {
         const workers = Math.max(2, Math.min(6, (navigator.hardwareConcurrency || 4) - 2)); const tP = Date.now(); let now = top.frames;
-        const paint = () => { const el = (Date.now() - tP) / 1000; ui.bar(Math.min(100, (100 * el) / secs)); ui.status(`微调榜单第 1 名的回放:${secStr(now)}(榜单 ${secStr(top.frames)},已快 ${top.frames - now} 帧),还剩约 ${Math.max(0, Math.round(secs - el))} s`); };
+        PG.enter('polish');
+        const paint = () => { const el = (Date.now() - tP) / 1000; PG.set(el / secs); ui.status(`微调榜单第 1 名的回放:${secStr(now)}(榜单 ${secStr(top.frames)},已快 ${top.frames - now} 帧)`); };
         paint(); const timer = setInterval(paint, 400);
         try {
           const r = await SOLVER.polishPlan(g, toggles, top.frames, { seconds: secs, workers, order: 'backward', random: false, log: (m) => ui.log(m), shouldStop: () => S.cancel, onImprove: (x) => { now = x.finishFrames; } });
           if (r.finishFrames < top.frames) {
-            ui.status('微调完成,用游戏自带 Verify 复核…');
+            PG.enter('v2'); ui.status('微调完成,用游戏自带 Verify 复核…');
             const rec = await encodeRecordingWeb(r.toggles);
             if (await verifyExact(g, rec, r.finishFrames)) {
               plan = { v: 1, finishFrames: r.finishFrames, toggles: r.toggles, recording: rec, verified: true, source: `榜单第 1 名回放 + 页面内微调(快 ${top.frames - r.finishFrames} 帧)`, solvedAt: Date.now(), solveSeconds: Math.round((Date.now() - t0) / 1000) };
@@ -221,6 +258,7 @@
           } else ui.log(`微调 ${secs} s 没找到更快的改法,用榜单回放原样(已存)`);
         } finally { clearInterval(timer); }
       }
+      PG.done('回放就绪');
       return plan;
     } finally { for (const p of PT.pool) p.w.terminate(); PT.pool = []; S.solving = false; }
   }
@@ -234,7 +272,7 @@
   async function obtainPlan(ui, id) {
     const src = primaryIdx(); if (src < 0) throw new Error('游戏还没准备好(先选好赛道、看到起点画面)');
     const have = planCandidates(id)[0] ?? null; let top = null, note = '';
-    ui.status('对照榜单第 1 名,看现成方案够不够快…');
+    ui.status('对照榜单第 1 名,看现成方案够不够快…'); ui.wait('对照榜单第 1 名');
     try { const tid = await trackId64(src, id); if (!tid) note = '读不到赛道编号'; else { top = await fetchTop1(tid); if (!top) note = '榜单上没有可用的第 1 名'; } } catch (e) { note = '榜单读取失败(' + String(e.message || e).slice(0, 40) + ')'; }
     if (have && (!top || have.finishFrames <= top.frames)) { ui.log(top ? `现成方案 ${secStr(have.finishFrames)}(${have.from})不慢于榜单第 1 名 ${secStr(top.frames)},不用重算` : `${note};直接用现成方案 ${secStr(have.finishFrames)}`); return { plan: have, canceled: false }; }
     if (top) {
@@ -246,7 +284,7 @@
     } else ui.log(note + ',改用现成方案或从零求解');
     if (have) return { plan: have, canceled: false };
     const old = loadLocal(id); if (isPlan(old)) return { plan: old, canceled: false }; // 以前求解但没通过 Verify 的方案:和过去一样照用
-    ui.busy('solve'); ui.bar(0);
+    ui.busy('solve');
     return { plan: await solve(ui), canceled: false };
   }
 
@@ -333,48 +371,156 @@
     const root = host.attachShadow({ mode: 'open' });
     root.innerHTML = `<style>
       :host{all:initial}
-      .box{position:fixed;top:64px;right:12px;width:268px;box-sizing:border-box;padding:10px 12px;border-radius:10px;background:rgba(14,20,40,.86);color:#e8ecff;font:12px/1.45 -apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif;box-shadow:0 4px 18px rgba(0,0,0,.45);user-select:none;pointer-events:auto}
-      .t{display:flex;align-items:center;justify-content:space-between;font-weight:600;font-size:13px;margin-bottom:6px}
-      .t small{font-weight:400;opacity:.6}
-      button{all:unset;box-sizing:border-box;display:block;width:100%;text-align:center;cursor:pointer;border-radius:8px;padding:8px 0;font-weight:600;font-size:14px;background:#3b82f6;color:#fff}
-      button:hover{filter:brightness(1.1)} button.stop{background:#ef4444} button.busy{background:#6b7280}
-      .row button.off{background:#1a2040;color:#7f89bd}
-      .row{display:flex;gap:6px;margin-top:6px} .row button{font-size:11px;font-weight:500;padding:4px 0;background:#2a3358}
-      .st{margin:6px 0 2px;min-height:17px;color:#ffe08a} .bar{height:4px;border-radius:2px;background:#2a3358;overflow:hidden;margin:4px 0}
-      .bar i{display:block;height:100%;width:0;background:#34d399}
-      .log{max-height:84px;overflow:auto;font-size:11px;opacity:.78;white-space:pre-wrap;word-break:break-all}
-      .ft{margin-top:6px;font-size:10px;opacity:.55;white-space:pre-line}
-      .hk{margin-top:4px;font-size:10px;opacity:.72;color:#9fb4ff}
-      .keys{display:none;margin:6px 0 2px} .keys.on{display:block}
-      .kr{display:flex;align-items:center;gap:10px}
-      .kb{display:grid;grid-template-columns:repeat(3,26px);grid-template-rows:repeat(2,24px);gap:3px;flex:none}
-      .k{box-sizing:border-box;display:flex;align-items:center;justify-content:center;border-radius:5px;background:#2a3358;color:#7f89bd;border:1px solid #3a4572;font-weight:700;font-size:12px;transition:background .05s}
-      .k.on{background:#34d399;color:#06281c;border-color:#6ee7b7;box-shadow:0 0 8px rgba(52,211,153,.75)}
-      .k.r{grid-column:3;grid-row:1;font-size:10px} .k.r.off{visibility:hidden}
+      *{box-sizing:border-box}
+      .box{position:fixed;top:64px;right:12px;width:292px;color:#e9edff;font:12px/1.5 -apple-system,BlinkMacSystemFont,'SF Pro Text','PingFang SC','Segoe UI',sans-serif;background:linear-gradient(180deg,rgba(26,31,56,.9),rgba(13,17,33,.92));-webkit-backdrop-filter:blur(14px) saturate(1.3);backdrop-filter:blur(14px) saturate(1.3);border:1px solid rgba(255,255,255,.09);border-radius:16px;box-shadow:0 14px 44px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.06);user-select:none;pointer-events:auto;overflow:hidden}
+      button{all:unset;box-sizing:border-box;cursor:pointer;text-align:center}
+      .hd{display:flex;align-items:center;gap:9px;padding:11px 10px 10px 13px;cursor:grab;touch-action:none}
+      .hd:active{cursor:grabbing}
+      .logo{flex:none;width:26px;height:26px;border-radius:8px;display:grid;place-items:center;background:linear-gradient(135deg,#6366f1,#22d3ee);box-shadow:0 2px 10px rgba(34,211,238,.35)}
+      .logo svg{width:15px;height:15px}
+      .nm{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.2}
+      .nm b{font-size:13.5px;font-weight:700;letter-spacing:.2px}
+      .nm small{font-size:10px;opacity:.55;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .hp{display:none;font-size:12px;font-weight:700;color:#7ee8c4;font-variant-numeric:tabular-nums}
+      .col .hp:not(:empty){display:block}
+      .ic{width:24px;height:24px;border-radius:7px;display:grid;place-items:center;color:#9aa6d6;transition:background .15s,color .15s}
+      .ic:hover{background:rgba(255,255,255,.1);color:#fff}
+      .ic svg{width:14px;height:14px;transition:transform .2s}
+      .col .ic svg{transform:rotate(180deg)}
+      .mini{height:2px;background:rgba(255,255,255,.06)}
+      .mini i{display:block;height:100%;width:0;background:linear-gradient(90deg,#34d399,#22d3ee);transition:width .25s}
+      .bd{padding:11px 13px 12px}
+      .col .bd{display:none}
+      .go{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:10px 0;border-radius:11px;font-weight:700;font-size:14px;color:#fff;background:linear-gradient(135deg,#3b82f6,#06b6d4);box-shadow:0 4px 16px rgba(59,130,246,.38);transition:transform .08s,filter .15s,box-shadow .15s}
+      .go:hover{filter:brightness(1.1);box-shadow:0 6px 20px rgba(59,130,246,.5)}
+      .go:active{transform:scale(.985)}
+      .go.busy{background:linear-gradient(135deg,#d97706,#f59e0b);box-shadow:0 4px 16px rgba(245,158,11,.32)}
+      .go.stop{background:linear-gradient(135deg,#dc2626,#f43f5e);box-shadow:0 4px 16px rgba(244,63,94,.35)}
+      .gi{font-size:12px}
+      .card{display:flex;gap:9px;align-items:flex-start;margin-top:10px;padding:8px 10px;border-radius:10px;background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.06)}
+      .dot{flex:none;width:8px;height:8px;border-radius:50%;margin-top:5px;background:#64708f}
+      .dot[data-s=work]{background:#fbbf24;animation:pulse 1.2s ease-in-out infinite}
+      .dot[data-s=drive]{background:#34d399;animation:pulse 1.2s ease-in-out infinite}
+      .dot[data-s=ok]{background:#34d399;box-shadow:0 0 8px #34d399}
+      .dot[data-s=err]{background:#f43f5e}
+      .dot[data-s=warn]{background:#fbbf24}
+      @keyframes pulse{50%{opacity:.35;transform:scale(.8)}}
+      .st{flex:1;min-width:0;min-height:18px;color:#f5e6b3;word-break:break-word;user-select:text}
+      .pg{margin-top:10px}
+      .pg.idle .pr,.pg.idle .chips,.pg.idle .pt{display:none}
+      .pg.idle .trk{height:4px;margin-top:0}
+      .pr{display:flex;align-items:baseline;justify-content:space-between;gap:8px;min-height:22px}
+      .pl{font-size:11px;color:#aeb8e6;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+      .pc{flex:none;font-size:20px;font-weight:700;font-variant-numeric:tabular-nums;color:#fff;letter-spacing:-.3px}
+      .trk{height:8px;border-radius:99px;background:rgba(255,255,255,.08);overflow:hidden;margin-top:3px;position:relative}
+      .trk i{display:block;height:100%;width:0;border-radius:99px;background:linear-gradient(90deg,#34d399,#22d3ee);transition:width .25s ease;position:relative;overflow:hidden}
+      .trk.act i::after{content:'';position:absolute;inset:0;background:linear-gradient(100deg,transparent 30%,rgba(255,255,255,.45) 50%,transparent 70%);background-size:200% 100%;animation:sheen 1.4s linear infinite}
+      @keyframes sheen{from{background-position:200% 0}to{background-position:-200% 0}}
+      .trk.ind i{width:38%!important;animation:ind 1.1s ease-in-out infinite alternate}
+      @keyframes ind{from{margin-left:0}to{margin-left:62%}}
+      .chips{display:flex;gap:5px;margin-top:8px;flex-wrap:wrap}
+      .chip{font-size:10px;padding:2px 8px;border-radius:99px;color:#7f8ab8;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.06)}
+      .chip.on{color:#06281c;background:#7ee8c4;border-color:#7ee8c4;font-weight:700}
+      .chip.ok{color:#7ee8c4;border-color:rgba(126,232,196,.35)}
+      .pt{margin-top:6px;font-size:10.5px;color:#8f9bc9;font-variant-numeric:tabular-nums}
+      .pt:empty,.chips:empty{display:none}
+      .tools{display:flex;gap:6px;margin-top:10px}
+      .gd{flex:1;display:flex;align-items:center;justify-content:space-between;padding:6px 10px;border-radius:9px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.07);color:#cdd5f7;font-size:11.5px;transition:background .15s}
+      .gd:hover{background:rgba(255,255,255,.1)}
+      .knob{width:26px;height:15px;border-radius:99px;background:#34d399;position:relative;transition:background .15s}
+      .knob::after{content:'';position:absolute;top:2px;left:13px;width:11px;height:11px;border-radius:50%;background:#fff;transition:left .15s}
+      .gd.off .knob{background:#4b5578}
+      .gd.off .knob::after{left:2px}
+      .ghost{flex:1;padding:6px 0;border-radius:9px;font-size:11px;color:#a8b3e3;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.06);transition:background .15s,color .15s}
+      .ghost:hover{background:rgba(255,255,255,.1);color:#fff}
+      .log{margin-top:10px;max-height:62px;overflow:auto;padding:6px 8px;border-radius:9px;background:rgba(0,0,0,.28);font:10.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;color:#9aa6d6;white-space:pre-wrap;word-break:break-all;cursor:pointer;user-select:text;scrollbar-width:thin}
+      .log.big{max-height:190px}
+      .log:empty{display:none}
+      .hk{margin-top:9px;font-size:10px;color:#7f8ab8}
+      .ft{margin-top:5px;font-size:9.5px;color:#606b94;white-space:pre-line;line-height:1.45}
+      .keys{display:none;margin-top:10px;padding:9px 10px;border-radius:10px;background:rgba(0,0,0,.22);border:1px solid rgba(255,255,255,.05)}
+      .keys.on{display:block}
+      .kr{display:flex;align-items:center;gap:12px}
+      .kb{display:grid;grid-template-columns:repeat(3,27px);grid-template-rows:repeat(2,25px);gap:4px;flex:none}
+      .k{display:flex;align-items:center;justify-content:center;border-radius:6px;background:rgba(255,255,255,.06);color:#7f8ab8;border:1px solid rgba(255,255,255,.1);border-bottom-width:2px;font-weight:700;font-size:12px;transition:background .05s,transform .05s}
+      .k.on{background:#34d399;color:#06281c;border-color:#7ee8c4;box-shadow:0 0 10px rgba(52,211,153,.7);transform:translateY(1px)}
+      .k.r{grid-column:3;grid-row:1;font-size:10px}
+      .k.r.off{visibility:hidden}
       .kt{font-size:13px;font-weight:600;color:#bff3df;min-height:18px}
-      #tl{display:block;width:100%;height:50px;margin-top:5px;border-radius:5px;background:#10162e}
+      #tl{display:block;width:100%;height:50px;margin-top:8px;border-radius:6px;background:rgba(0,0,0,.28)}
+      @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
     </style>
-    <div class="box"><div class="t"><span>PolyTrack AI</span><small id="ver">0.6.3 · 本地研究用</small></div>
-      <button id="go" tabindex="-1">▶ 一键自动驾驶</button>
-      <div class="st" id="st">待命</div><div class="bar"><i id="bar"></i></div>
-      <div class="keys" id="keys"><div class="kr"><div class="kb"><b class="k r off" id="k_reset">R</b><b class="k" id="k_up" style="grid-column:2;grid-row:1">W</b><b class="k" id="k_left" style="grid-column:1;grid-row:2">A</b><b class="k" id="k_down" style="grid-column:2;grid-row:2">S</b><b class="k" id="k_right" style="grid-column:3;grid-row:2">D</b></div><div class="kt" id="kt">&nbsp;</div></div>
-        <canvas id="tl" width="244" height="50"></canvas></div>
-      <div class="row"><button id="gd" tabindex="-1">引导线:开</button></div>
-      <div class="row"><button id="clr" tabindex="-1">清除本赛道缓存</button><button id="cp" tabindex="-1">复制回放串</button></div>
-      <div class="log" id="log"></div>
-      <div class="hk" id="hk"></div>
-      <div class="ft" id="ft">只读榜单、从不上传成绩;成绩是否上传由游戏结算界面决定。</div></div>`;
+    <div class="box" id="box">
+      <div class="hd" id="hd">
+        <span class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19c4 0 4-7 8-7s4-7 8-7"/><circle cx="4" cy="19" r="1.3" fill="#fff"/><circle cx="20" cy="5" r="1.3" fill="#fff"/></svg></span>
+        <span class="nm"><b>PolyTrack AI</b><small id="ver">0.6.3 · 本地研究用</small></span>
+        <span class="hp" id="hp"></span>
+        <button class="ic" id="min" tabindex="-1" title="折叠 / 展开"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6"/></svg></button>
+      </div>
+      <div class="mini"><i id="mbar"></i></div>
+      <div class="bd" id="bd">
+        <button class="go" id="go" tabindex="-1"><span class="gi" id="gi">▶</span><span id="gt">一键自动驾驶</span></button>
+        <div class="card"><i class="dot" id="dot" data-s="idle"></i><div class="st" id="st">待命</div></div>
+        <div class="pg idle" id="pg">
+          <div class="pr"><span class="pl" id="pl"></span><span class="pc" id="pc"></span></div>
+          <div class="trk" id="trk"><i id="bar"></i></div>
+          <div class="chips" id="chips"></div>
+          <div class="pt" id="pt"></div>
+        </div>
+        <div class="keys" id="keys"><div class="kr"><div class="kb"><b class="k r off" id="k_reset">R</b><b class="k" id="k_up" style="grid-column:2;grid-row:1">W</b><b class="k" id="k_left" style="grid-column:1;grid-row:2">A</b><b class="k" id="k_down" style="grid-column:2;grid-row:2">S</b><b class="k" id="k_right" style="grid-column:3;grid-row:2">D</b></div><div class="kt" id="kt">&nbsp;</div></div>
+          <canvas id="tl" width="264" height="50"></canvas></div>
+        <div class="tools"><button class="gd" id="gd" tabindex="-1"><span>引导线</span><i class="knob"></i></button></div>
+        <div class="tools"><button class="ghost" id="clr" tabindex="-1">清除本赛道缓存</button><button class="ghost" id="cp" tabindex="-1">复制回放串</button></div>
+        <div class="log" id="log" title="点击展开 / 收起"></div>
+        <div class="hk" id="hk"></div>
+        <div class="ft" id="ft">只读榜单、从不上传成绩;成绩是否上传由游戏结算界面决定。</div>
+      </div>
+    </div>`;
     document.documentElement.appendChild(host);
     const $ = (id) => root.getElementById(id);
     for (const b of root.querySelectorAll('button')) b.addEventListener('mousedown', (e) => e.preventDefault()); // 不抢键盘焦点(否则 Enter / 空格会触发按钮)
-    const lines = [];
+    // ---- 折叠 / 拖动(位置和折叠状态记在 localStorage,存不了也不影响使用) ----
+    const box = $('box');
+    const lsGet = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
+    const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch { /* ignore */ } };
+    if (lsGet('ptai:collapsed') === '1') box.classList.add('col');
+    $('min').addEventListener('click', () => lsSet('ptai:collapsed', box.classList.toggle('col') ? '1' : '0'));
+    $('log').addEventListener('click', () => $('log').classList.toggle('big'));
+    const place = (x, y) => { const w = box.offsetWidth || 292; box.style.left = Math.max(4, Math.min(window.innerWidth - w - 4, x)) + 'px'; box.style.top = Math.max(4, Math.min(window.innerHeight - 44, y)) + 'px'; box.style.right = 'auto'; };
+    try { const p = JSON.parse(lsGet('ptai:pos') || 'null'); if (p && Number.isFinite(p.x) && Number.isFinite(p.y)) place(p.x, p.y); } catch { /* ignore */ }
+    let drag = null;
+    $('hd').addEventListener('pointerdown', (e) => { if (e.button !== 0 || e.target.closest('button')) return; const r = box.getBoundingClientRect(); drag = { dx: e.clientX - r.left, dy: e.clientY - r.top }; $('hd').setPointerCapture(e.pointerId); e.preventDefault(); });
+    $('hd').addEventListener('pointermove', (e) => { if (drag) place(e.clientX - drag.dx, e.clientY - drag.dy); });
+    const endDrag = () => { if (!drag) return; drag = null; const r = box.getBoundingClientRect(); lsSet('ptai:pos', JSON.stringify({ x: Math.round(r.left), y: Math.round(r.top) })); };
+    $('hd').addEventListener('pointerup', endDrag); $('hd').addEventListener('pointercancel', endDrag);
+    window.addEventListener('resize', () => { if (box.style.left) { const r = box.getBoundingClientRect(); place(r.left, r.top); } });
+    // ---- 状态 / 进度 ----
+    const lines = []; let mode = 'idle', tone = '', chipKey = '';
+    const fmtT = (s) => { s = Math.max(0, Math.round(s)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+    const dotPaint = () => { $('dot').dataset.s = mode === 'solve' ? 'work' : mode === 'drive' ? 'drive' : tone || 'idle'; };
+    /** 画进度条。p = 0~100;o = { label 阶段名, steps 阶段名列表, step 当前阶段序号(超过末尾 = 全部完成), time 底部小字 } */
+    const setBar = (p, o = {}) => {
+      const pct = Math.max(0, Math.min(100, p || 0)), w = pct + '%', has = pct > 0 || !!o.label;
+      $('bar').style.width = w; $('mbar').style.width = w;
+      $('trk').classList.remove('ind'); $('trk').classList.toggle('act', mode !== 'idle' && pct > 0 && pct < 100);
+      $('pg').classList.toggle('idle', !has);
+      $('pl').textContent = o.label ?? ''; $('pc').textContent = has && pct > 0 ? Math.floor(pct) + '%' : ''; $('hp').textContent = pct > 0 ? Math.floor(pct) + '%' : '';
+      const key = o.steps ? o.steps.join('|') + '#' + o.step : '';
+      if (key !== chipKey) { chipKey = key; $('chips').innerHTML = o.steps ? o.steps.map((t, i) => `<span class="chip ${i < o.step ? 'ok' : i === o.step ? 'on' : ''}">${i < o.step ? '✓ ' : ''}${t}</span>`).join('') : ''; }
+      $('pt').textContent = o.time ?? '';
+    };
     const ui = {
-      status: (t) => { $('st').textContent = t; },
+      status: (t) => { $('st').textContent = t; tone = /^完成/.test(t) ? 'ok' : /失败|出错/.test(t) ? 'err' : /^已(停止|取消)/.test(t) ? 'warn' : ''; dotPaint(); },
       log: (t) => { lines.push(t); if (lines.length > 40) lines.shift(); $('log').textContent = lines.slice(-6).join('\n'); $('log').scrollTop = 1e9; },
-      drive: (f, total) => { $('bar').style.width = Math.min(100, (100 * f) / total) + '%'; $('st').textContent = `自动驾驶中 ${(f / 1000).toFixed(2)} s / ${(total / 1000).toFixed(2)} s`; },
-      busy: (mode) => { const b = $('go'); b.className = mode === 'idle' ? '' : mode === 'solve' ? 'busy' : 'stop'; b.textContent = mode === 'idle' ? '▶ 一键自动驾驶' : mode === 'solve' ? '■ 取消求解' : '■ 停止(交还给我)'; },
-      foot: () => { $('ft').textContent = `v${BUILD.v} · 构建 ${BUILD.t} · ${BUILD.local ? '本机方案 ' + BUILD.local + ' 条' : '公开版'} · 只读榜单、从不上传成绩;成绩是否上传由游戏结算界面决定。`; },
-      bar: (p) => { $('bar').style.width = p + '%'; },
+      drive: (f, total) => { setBar((100 * f) / total, { label: '自动驾驶', time: `${(f / 1000).toFixed(2)} s / ${(total / 1000).toFixed(2)} s` }); $('st').textContent = `自动驾驶中 ${(f / 1000).toFixed(2)} s / ${(total / 1000).toFixed(2)} s`; },
+      busy: (m) => { mode = m; const b = $('go'); b.className = 'go' + (m === 'solve' ? ' busy' : m === 'drive' ? ' stop' : ''); $('gi').textContent = m === 'idle' ? '▶' : '■'; $('gt').textContent = m === 'idle' ? '一键自动驾驶' : m === 'solve' ? '取消求解' : '停止(交还给我)'; dotPaint(); },
+      foot: () => { $('ft').textContent = `v${BUILD.v} · 构建 ${BUILD.t} · ${BUILD.local ? '本机方案 ' + BUILD.local + ' 条' : '公开版'} · 只读榜单、从不上传成绩;成绩是否上传由游戏结算界面决定。`; $('ver').textContent = `v${BUILD.v} · 适配 PolyTrack 0.6.3 · 本地研究用`; },
+      /** 简单进度条(自动驾驶 / 清零用):0 = 收起,100 = 完成 */
+      bar: (p) => setBar(p, p >= 100 ? { label: '完成' } : {}),
+      /** 分阶段进度(求解 / 微调用):pct 总百分比,label 当前阶段,steps / step 阶段条,elapsed 已用秒,rest 估计还需秒(未知为 null) */
+      progress: ({ pct, label, steps, step, elapsed, rest }) => setBar(pct, { label, steps, step, time: `已用 ${fmtT(elapsed)}${rest != null ? ` · 预计还需 ${fmtT(rest)}` : ''}` }),
+      /** 不定长等待(读榜单、建势能):来回扫的条 */
+      wait: (label) => { setBar(0, { label }); $('trk').classList.add('ind'); },
       hint: (t) => { $('hk').textContent = t; },
       setPanel: (on) => { host.style.display = on ? '' : 'none'; },
       panelVisible: () => host.style.display !== 'none',
@@ -393,7 +539,7 @@
       for (const [id, bit] of CAPS) $(id).classList.toggle('on', ((mask >> bit) & 1) === 1);
       $('k_reset').classList.toggle('off', !(toggles[4] || []).length && !(mask & 16));
       $('kt').textContent = [0, 2, 1, 3, 4].filter((b) => (mask >> b) & 1).map((b) => NAMES[b]).join(' + ') || '松开';
-      const cv = $('tl'), dpr = Math.min(3, window.devicePixelRatio || 1), W = 244, H = 50;
+      const cv = $('tl'), dpr = Math.min(3, window.devicePixelRatio || 1), W = 264, H = 50;
       if (cv.width !== W * dpr) { cv.width = W * dpr; cv.height = H * dpr; }
       const c = cv.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, W, H);
       const x0 = 14, pw = W - x0 - 2, rh = H / ROWS.length, t0 = f - PAST, xf = (t) => x0 + ((t - t0) / (PAST + FUT)) * pw;
@@ -479,16 +625,16 @@
         try {
           const r = await obtainPlan(ui, id); plan = r.plan;
           if (r.canceled) { const text = `已取消微调:方案 ${(plan.finishFrames / 1000).toFixed(3)} s 已存好,再点一次直接开`; sticky = { id, text }; ui.status(text); ui.bar(0); ui.busy('idle'); return; }
-        } catch (e) { ui.status('求解失败:' + e.message); ui.log('求解失败: ' + e.message); sticky = { id, text: '求解失败:' + e.message }; ui.busy('idle'); return; }
-        ui.busy('drive'); ui.status('自动驾驶:回到起点并出发…');
+        } catch (e) { ui.status('求解失败:' + e.message); ui.log('求解失败: ' + e.message); sticky = { id, text: '求解失败:' + e.message }; ui.bar(0); ui.busy('idle'); return; }
+        ui.bar(0); ui.busy('drive'); ui.status('自动驾驶:回到起点并出发…');
         const r = await drive(plan, ui);
         const text = r.finished != null ? `完成:${(r.finished / 1000).toFixed(3)} s(方案 ${(plan.finishFrames / 1000).toFixed(3)} s)` : '已停止';
         sticky = { id, text }; ui.status(text);
         ui.bar(r.finished != null ? 100 : 0);
-      } catch (e) { ui.status('出错:' + e.message); ui.log('出错: ' + e.message); sticky = { id: curTrackId(), text: '出错:' + e.message }; }
+      } catch (e) { ui.status('出错:' + e.message); ui.log('出错: ' + e.message); sticky = { id: curTrackId(), text: '出错:' + e.message }; ui.bar(0); }
       finally { running = false; ui.busy('idle'); }
     };
-    const paintGd = () => { const b = ui.$('gd'); b.textContent = '引导线:' + (S.guideOn ? '开' : '关'); b.classList.toggle('off', !S.guideOn); };
+    const paintGd = () => { const b = ui.$('gd'); b.title = '引导线:' + (S.guideOn ? '开(点击关闭)' : '关(点击打开)'); b.classList.toggle('off', !S.guideOn); };
     paintGd();
     ui.$('gd').addEventListener('click', () => {
       S.guideOn = !S.guideOn; try { localStorage.setItem('ptai:guide', S.guideOn ? '1' : '0'); } catch { /* ignore */ }

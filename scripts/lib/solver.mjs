@@ -134,7 +134,7 @@ export class Solver {
     let segs = baseSegs, horizon = segs.length, total = 0, smpAt = [], slowMode = false, mode = 'base', recoverUntil = -1;
     const setSegs = (sg) => { segs = sg; horizon = sg.length; total = sg.reduce((a, b) => a + b, 0); smpAt = []; let c = 0; for (const x of sg) { c += x; smpAt.push(c); } };
     setSegs(baseSegs);
-    let lastV = null; let rollbacks = 0; const committed = []; const durs = []; let frames = 0; let carry = null; let fin = -1; let step = 0;
+    let maxS = 0; let lastV = null; let rollbacks = 0; const committed = []; const durs = []; let frames = 0; let carry = null; let fin = -1; let step = 0;
     if (this.o.prefix) { // 从已有的提交序列(前缀)继续规划:只重算后面的部分,用来快速验证"某个卡点之后能不能过"
       committed.push(...this.o.prefix.committed); durs.push(...this.o.prefix.durs);
       const c0 = await this.g.commit(committed, 1, durs, true); frames = c0.frames; lastV = c0.last ? c0.last[1] : null;
@@ -195,6 +195,10 @@ export class Solver {
       if (c.last) (this.posHist ??= []).push([c.frames, c.last[5], c.last[6], c.last[7], this.prog.query(c.last[5], c.last[7], c.last[6], c.last[4]).s]);
       committed.push(...acts); durs.push(...segs.slice(0, acts.length)); frames = c.frames; fin = c.fin; lastV = c.last ? c.last[1] : lastV; carry = best.plan.slice(take);
       step++; if (rollbacks > 0 && frames > recoverUntil) rollbacks = 0; // 越过恢复窗口就清零,零星的几次失败不该耗光额度
+      if (this.o.onProgress) { // 进度回调(可选,页面里的进度条用):沿中线已到达的最远位置 / 中线总长,只增不减(回退不让进度条倒退)
+        if (c.last) { const qs = this.prog.query(c.last[5], c.last[7], c.last[6], c.last[4]).s; if (qs > maxS) maxS = qs; }
+        this.o.onProgress({ stage: 'plan', frac: fin >= 0 ? 1 : Math.max(0, Math.min(0.999, maxS / this.prog.length)), frames, kmh: c.last ? c.last[1] : null });
+      }
       this.partial = { committed: committed.slice(), durs: durs.slice(), frames, last: c.last };
       if (this.o.stopS != null && c.last) { const qs = this.prog.query(c.last[5], c.last[7], c.last[6], c.last[4]).s; if (qs >= this.o.stopS) { this.stopped = { frames, v: c.last[1], pos: [c.last[5], c.last[6], c.last[7]], s: qs, cp: c.last[4] }; break; } } // 局部实验:到达指定中线进度就停(比较"谁先到")
       if (c.last && this.o.stallFrames) { // 停滞看门狗:最近 stallFrames 帧内进度增长不足 stallMeters => 快速失败(并保留现场供诊断)
@@ -261,6 +265,7 @@ export class Solver {
     let best = Array.from(masks0), bestFin = fin0; const t0 = Date.now(); let it = 0, accepted = 0; const history = [{ it: 0, fin: bestFin, t: 0 }];
     while ((Date.now() - t0) / 1000 < seconds && it < maxIters && !this.o.cancel?.()) { // maxIters 给定时按迭代数停止(可复现);否则按时间
       it++;
+      this.o.onProgress?.({ stage: 'polish', frac: Math.min(1, Math.max((Date.now() - t0) / 1000 / seconds, maxIters === Infinity ? 0 : it / maxIters)), fin: bestFin });
       const n = best.length; const Lw = [30, 60, 120, 240][Math.floor(this.rng() * 4)];
       const W = Math.floor(this.rng() * Math.max(1, n - 50));
       const win = best.slice(W, W + Lw); const tail = best.slice(W + Lw, W + Lw + K);

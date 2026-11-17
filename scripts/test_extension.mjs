@@ -7,6 +7,7 @@
 //   --lb-live             榜单两个只读接口(/v6/leaderboard、/v6/recordings 的 GET)放行到真实服务器,其余一律 abort
 //   --build 路径          用另一份构建产物(例如 build_extension.mjs --public --no-bundled --out 生成的"没有任何现成方案"版)
 //   --polish 秒           把页面内微调的预算改成这么多秒(默认 120);0 = 只取榜单回放、不微调
+//   --dsf N               截图的设备像素比(默认 1;看面板细节用 2)。--shots 目录 时每个阶段额外截一张只含面板的图(panel_*.png)
 //   --twice               第一次完成后在同一页再点一次(回起点后再开):应当直接用刚存进缓存的方案、不再取榜单 / 微调;并打印缓存里的方案
 // 为了不向游戏服务器发任何东西:测试里对 vps.kodub.com 的请求一律 abort(只有上面两个榜单只读 GET 在 --lb-mock / --lb-live 下例外),并统计页面**尝试**发出的写入类请求(扩展本身不拦截网络,所以游戏自己的成绩上传会被尝试,但全部被这里的 route.abort() 拦下,没有一个真的到达服务器)。
 import fs from 'node:fs';
@@ -25,7 +26,7 @@ const track = a.track ? fs.readFileSync(a.track, 'utf8').trim() : null;
 const timeoutS = Number(a.timeout ?? 600);
 
 const browser = await chromium.launch({ ...(process.env.PT_CHROME === '' ? {} : { channel: 'chrome' }), headless: !a.headed, args: ['--autoplay-policy=no-user-gesture-required'] });
-const ctx = await browser.newContext({ viewport: { width: Number(a.width ?? 1280), height: Number(a.height ?? 720) } });
+const ctx = await browser.newContext({ viewport: { width: Number(a.width ?? 1280), height: Number(a.height ?? 720) }, deviceScaleFactor: Number(a.dsf ?? 1) });
 let vpsWrites = 0; const vpsSeen = [];
 const lbMock = a['lb-mock'] ? (() => { const j0 = JSON.parse(fs.readFileSync(a['lb-mock'], 'utf8')); return j0.plan ?? j0; })() : null;
 const CORS = { 'access-control-allow-origin': '*' };
@@ -62,7 +63,8 @@ for (;;) { // 等面板和游戏就绪
 }
 if (a.shots) fs.mkdirSync(a.shots, { recursive: true });
 const shot = async (name) => { if (a.shots) await page.screenshot({ path: path.join(a.shots, name + '.png') }).catch(() => {}); };
-await shot('00_ready');
+const shotPanel = async (name) => { if (!a.shots) return; const r = await ui(() => { const b = window.__ptai.ui.$('box').getBoundingClientRect(); return { x: b.x, y: b.y, width: b.width, height: b.height }; }).catch(() => null); if (r) await page.screenshot({ path: path.join(a.shots, 'panel_' + name + '.png'), clip: { x: Math.max(0, r.x - 6), y: Math.max(0, r.y - 6), width: r.width + 12, height: r.height + 12 } }).catch(() => {}); };
+await shot('00_ready'); await shotPanel('00_ready');
 if (a.plan) {
   const j0 = JSON.parse(fs.readFileSync(a.plan, 'utf8')); const j = j0.plan ?? j0; // make_local_plan.mjs 的输出({key, plan})或 solve.mjs 的结果 JSON 都行
   await page.evaluate((p) => window.__ptai.savePlan(window.__ptai.curTrackId(), { v: 1, finishFrames: p.finishFrames, toggles: p.toggles, recording: p.recording, verified: true, solvedAt: Date.now(), ...(p.source ? { source: p.source } : {}) }), j);
@@ -80,12 +82,13 @@ async function clickAndWait(label) {
     const st = await ui(() => ({ st: window.__ptai.ui.$('st').textContent, log: window.__ptai.ui.$('log').textContent.split('\n').slice(-2).join(' | ') })).catch(() => null);
     if (!st) continue;
     if (st.st !== lastSt) { console.log(`[${((Date.now() - tStart) / 1000).toFixed(0)}s] ${st.st}   (${st.log})`); lastSt = st.st; }
-    if (a.shots && n++ % Number(a['shot-every'] ?? 4) === 0) await shot(label.replace(/\W/g, '') + 'run_' + String(n).padStart(3, '0'));
+    if (a.shots && n++ % Number(a['shot-every'] ?? 4) === 0) { await shot(label.replace(/\W/g, '') + 'run_' + String(n).padStart(3, '0')); await shotPanel(label.replace(/\W/g, '') + 'run_' + String(n).padStart(3, '0')); }
     if (/^完成|^求解失败|^出错|^已停止|^已取消/.test(st.st)) return st.st;
     if ((Date.now() - tStart) / 1000 > timeoutS) return 'timeout';
   }
 }
 await page.evaluate((p) => { window.__ptai.S.debugKeys = true; if (p != null) window.__ptai.S.polishSeconds = Number(p); }, a.polish ?? null); // 记录每个循环里 物理侧按键位 与 方案按键位,结束后核对按键显示的数据源
+await page.evaluate(() => { const u = window.__ptai.ui; window.__pgLog = []; const t0 = performance.now(); setInterval(() => window.__pgLog.push({ t: Math.round(performance.now() - t0), pc: u.$('pc').textContent, pl: u.$('pl').textContent, pt: u.$('pt').textContent, chips: u.$('chips').textContent, ind: u.$('trk').classList.contains('ind'), w: u.$('bar').style.width, dot: u.$('dot').dataset.s, st: u.$('st').textContent }), 250); });
 let outcome = await clickAndWait('');
 if (a.twice && /^完成/.test(outcome)) {
   const cached = await ui(() => { const id = window.__ptai.curTrackId(); const raw = localStorage.getItem('ptai1:' + id); const p = raw ? JSON.parse(raw) : null; return p ? { finishFrames: p.finishFrames, verified: p.verified, source: p.source } : null; });
@@ -93,7 +96,13 @@ if (a.twice && /^完成/.test(outcome)) {
   await new Promise((r2) => setTimeout(r2, 1500)); const o2 = await clickAndWait('(第二次:先按 T 回起点)'); outcome = outcome + ' | 第二次: ' + o2;
   console.log('第二次的日志:', (await ui(() => window.__ptai.ui.$('log').textContent)).replace(/\n/g, ' | '), '| 第二次期间的榜单请求:', JSON.stringify(vpsSeen));
 }
-await shot('99_final');
+await shot('99_final'); await shotPanel('99_final');
+{ // 进度条核对:阶段内百分比不倒退、读榜单时是不定长条、求解 / 微调结束到 100%、结束后收起
+  const L = await ui(() => window.__pgLog.slice()); const num = (x) => (x.pc ? parseInt(x.pc, 10) : null);
+  const seg = []; for (const x of L) { const k = x.ind ? '不定长:' + x.pl : x.pl; if (!k) continue; const last = seg[seg.length - 1]; if (last && last.k === k) { last.n++; last.hi = Math.max(last.hi, num(x) ?? -1); last.lo = Math.min(last.lo, num(x) ?? 1e9); last.pt = x.pt || last.pt; last.chips = x.chips || last.chips; last.back = last.back || (num(x) != null && last.prev != null && num(x) < last.prev); last.prev = num(x) ?? last.prev; } else seg.push({ k, n: 1, lo: num(x) ?? 1e9, hi: num(x) ?? -1, pt: x.pt, chips: x.chips, back: false, prev: num(x) }); }
+  console.log('进度条采样(250 ms 一次,共 ' + L.length + ' 次),按阶段:'); for (const g of seg) console.log(`  ${g.k.padEnd(18)} ${String(g.n).padStart(4)} 次  ${g.lo > 1e8 ? '-' : g.lo}% ~ ${g.hi < 0 ? '-' : g.hi}%${g.back ? '  (有倒退!)' : ''}  ${g.chips ? '[' + g.chips + ']' : ''} ${g.pt ? '「' + g.pt + '」' : ''}`);
+  const dots = [...new Set(L.map((x) => x.dot))]; console.log('状态点出现过:', dots.join(','), '| 最后一次采样:', JSON.stringify(L[L.length - 1] ?? null));
+}
 // 按键显示核对:物理侧实际收到的按键位 ctl 应当和方案在该帧(允许 ±1 帧的边沿)按住的键一致
 const kd = await ui(() => { const id = window.__ptai.curTrackId(); const p = window.__ptai.loadPlan(id); return { log: window.__ptai.S.keyLog || [], toggles: p ? p.toggles : null }; });
 const pm = (tg, f) => { let m = 0; for (let ki = 0; ki < 5; ki++) { const t = tg[ki] || []; let n = 0; while (n < t.length && t[n] <= f) n++; if (n & 1) m |= 1 << ki; } return m; };
