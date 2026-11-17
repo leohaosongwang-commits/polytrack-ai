@@ -733,6 +733,250 @@ class Solver {
   }
 }
 
+// 帧级局部搜索(TAS 式打磨)的核心:不碰文件、不启动浏览器,只依赖一个"游戏"适配对象 g(makePool / evalBatch / commit),
+// 所以 Node 脚本(scripts/tas_polish.mjs,Playwright 里的 g)和页面里的扩展(extension/src/core.js,makeG 返回的 g)共用同一份代码。
+//
+// 在一份已有的逐帧按键方案上反复做小改动(平移翻转帧、平移/删除短脉冲、替换一小段、时间扭曲……),
+// 每个候选从"窗口起点的快照"出发,窗口之后沿用原方案的按键一直模拟到冲线,直接用真实完成帧做目标。
+// 只接受完成帧更小(或相同且翻转次数不增)的候选,所以结果单调不变差;游戏自带 Verify 由调用方做。
+// 与 solver.polish 的区别:不用势能做代理评分,目标就是完成帧本身。
+// "闸门对齐"(默认开):窗口较早时,改动会让车比原来早/晚到达后面的地形,后半段按绝对帧号发出的按键就对不上了,
+//   所以在窗口之后 300~1500 帧处取原方案轨迹上的一个"闸门"(过该点、法向=该处速度方向的平面),
+//   候选越过闸门的那一刻起,后半段按键改按"越过时刻"对齐(并随机试 ±5 帧偏移)。这样早期的结构性改动(起飞速度、落点、漂移时机)也能被真实完成帧公平地评价。
+// 先做 1-opt 穷举扫描(每个键的每个翻转帧平移若干固定量、每个脉冲整体平移,带/不带闸门各评一遍),到局部最优后再做结构性扫描和随机多点变异。
+// 扫描顺序:forward = 从前往后(默认,离线长跑用);backward = 从后往前。候选的代价 ≈ 事件到终点的剩余帧数,
+//   所以后段事件很便宜;预算只有几分钟时,从后往前能在同样时间里覆盖多得多的事件,而且后段的改进不会让前段的候选失效。
+
+const POOL_ACTIONS = [1, 3, 9, 5, 4, 7, 13, 12, 6, 2, 8, 0]; // W WR WL WS S WSR WSL SL SR R L ·
+const nToggles = (m) => { let c = 0; for (let f = 1; f < m.length; f++) if (m[f] !== m[f - 1]) c++; return c; };
+
+/** 对窗口(逐帧掩码)做 1~2 个随机改动;时间扭曲会改变窗口长度 */
+function mutateWin(win, rng) {
+  const out = Array.from(win); let L = out.length; const ri = (lo, hi) => lo + Math.floor(rng() * (hi - lo + 1));
+  const nm = rng() < 0.3 ? 2 : 1;
+  const dAbs = () => { const u = rng(); return u < 0.7 ? 1 + Math.floor(rng() * rng() * 12) : u < 0.95 ? ri(10, 60) : ri(60, 200); }; // 重尾:偶尔做大幅平移
+  const dSgn = () => (rng() < 0.5 ? -1 : 1) * dAbs();
+  for (let t = 0; t < nm; t++) {
+    L = out.length; const edges = []; for (let f = 1; f < L; f++) if (out[f] !== out[f - 1]) edges.push(f);
+    const kind = rng();
+    if (kind < 0.45 && edges.length) { // 平移一个翻转边界
+      const e = edges[ri(0, edges.length - 1)]; const d = dSgn();
+      if (d > 0) { for (let f = e; f < Math.min(L, e + d); f++) out[f] = out[e - 1]; } else { for (let f = Math.max(0, e + d); f < e; f++) out[f] = out[e]; }
+    } else if (kind < 0.62 && edges.length >= 2) { // 整体平移一个短脉冲
+      const i = ri(0, edges.length - 2); const e1 = edges[i], e2 = edges[i + 1]; if (e2 - e1 <= 160) { const pm = out[e1], bg = out[e1 - 1]; const d = dSgn(); for (let f = e1; f < e2; f++) out[f] = bg; for (let f = Math.max(0, e1 + d); f < Math.min(L, e2 + d); f++) out[f] = pm; }
+    } else if (kind < 0.70 && edges.length >= 2) { // 删掉一个短脉冲
+      const i = ri(0, edges.length - 2); const e1 = edges[i], e2 = edges[i + 1]; if (e2 - e1 <= 120) for (let f = e1; f < e2; f++) out[f] = out[e1 - 1];
+    } else if (kind < 0.80) { // 把一小段换成别的动作
+      const a = ri(0, L - 1), len = ri(2, Math.min(L, 80)), act = POOL_ACTIONS[ri(0, POOL_ACTIONS.length - 1)]; for (let f = a; f < Math.min(L, a + len); f++) out[f] = act;
+    } else if (kind < 0.88) { // 在一段里加一个短脉冲(刹车 / 转向 / 刹车+转向),长度重尾
+      const a = ri(0, L - 1), len = rng() < 0.8 ? ri(3, 40) : ri(40, 200); const add = [2, 8, 4, 6, 12][ri(0, 4)];
+      for (let f = a; f < Math.min(L, a + len); f++) { let x = out[f] | add; if (add & 2) x &= ~8; if (add & 8) x &= ~2; out[f] = x; }
+    } else if (kind < 0.94) { // 时间扭曲:删掉或复制几帧,使窗口之后的原按键整体提前/推后 d 帧
+      const d = 1 + Math.floor(rng() * rng() * 8); const a = ri(0, Math.max(0, out.length - 1));
+      if (rng() < 0.5 && out.length > d + 20) out.splice(a, d); else out.splice(a, 0, ...Array(d).fill(out[a]));
+    } else { // 去掉一段里的转向
+      const a = ri(0, L - 1), len = ri(4, Math.min(L, 60)); for (let f = a; f < Math.min(L, a + len); f++) out[f] &= ~(2 | 8);
+    }
+  }
+  return out;
+}
+
+/** 某个键(位掩码 bit)在逐帧掩码里的翻转帧(第 f 帧与第 f-1 帧不同;f>=1) */
+function keyEdges(m, bit) { const e = []; for (let f = 1; f < m.length; f++) if ((m[f] & bit) !== (m[f - 1] & bit)) e.push(f); return e; }
+
+/** 单键单翻转帧平移候选:把第 tau 帧处 bit 的翻转挪到 tau+d(不越过相邻的同键翻转)。返回 {W, L, plans}(plans[0] 是原窗口) */
+function singleShiftCandidates(best, bit, tau, ds, prev, next) {
+  const W = Math.max(0, tau - 14), L = 48, win = best.slice(W, W + L); const plans = [win];
+  for (const d of ds) {
+    const out = win.slice(); const lo = Math.max(W, prev ?? 0), hi = Math.min(W + L, next ?? 1e9);
+    if (d > 0) { const v = best[tau - 1] & bit; for (let f = tau; f < Math.min(hi, tau + d); f++) out[f - W] = (out[f - W] & ~bit) | v; }
+    else { const v = best[tau] & bit; for (let f = Math.max(lo, tau + d); f < tau; f++) out[f - W] = (out[f - W] & ~bit) | v; }
+    plans.push(out);
+  }
+  return { W, L, plans };
+}
+
+/** 短脉冲整体平移候选:同键相邻两个翻转 e1<e2 之间的脉冲,整体平移 d 帧 */
+function pulseShiftCandidates(best, bit, e1, e2, ds, prev, next) {
+  const W = Math.max(0, e1 - 14), L = (e2 - e1) + 48, win = best.slice(W, W + L); const plans = [win]; const bg = best[e1 - 1] & bit, pm = best[e1] & bit;
+  for (const d of ds) {
+    const out = win.slice(); for (let f = e1; f < e2; f++) out[f - W] = (out[f - W] & ~bit) | bg;
+    const a = Math.max(W, prev ?? 0, e1 + d), b = Math.min(W + L, next ?? 1e9, e2 + d); for (let f = a; f < b; f++) out[f - W] = (out[f - W] & ~bit) | pm;
+    plans.push(out);
+  }
+  return { W, L, plans };
+}
+
+/** 大幅平移候选:窗口按 ds 的范围自适应 */
+function bigShiftCandidates(best, bit, tau, ds, prev, next) {
+  const W = Math.max(0, tau + Math.min(...ds) - 6), L = Math.max(...ds) - Math.min(...ds) + 24; const win = best.slice(W, W + L); const plans = [win];
+  for (const d of ds) {
+    const out = win.slice(); const lo = Math.max(W, prev ?? 0), hi = Math.min(W + L, next ?? 1e9);
+    if (d > 0) { const v = best[tau - 1] & bit; for (let f = tau; f < Math.min(hi, tau + d); f++) out[f - W] = (out[f - W] & ~bit) | v; }
+    else { const v = best[tau] & bit; for (let f = Math.max(lo, tau + d); f < tau; f++) out[f - W] = (out[f - W] & ~bit) | v; }
+    plans.push(out);
+  }
+  return { W, L, plans };
+}
+
+const applyKeys = (m, add) => { let x = m | add; if (add & 2) x &= ~8; if (add & 8) x &= ~2; return x; };
+/** 插入候选:在 p 处插入一个短脉冲(刹车 / 转向 / 刹车+转向 / 松油门)长度各取几档 */
+function insertCandidates(best, p) {
+  const W = Math.max(0, p - 6), L = 110, win = best.slice(W, W + L); const plans = [win];
+  for (const add of [4, 2, 8, 6, 12, 'coast']) for (const len of [8, 20, 50]) {
+    const out = win.slice(); for (let f = p; f < Math.min(W + L, p + len); f++) out[f - W] = add === 'coast' ? out[f - W] & ~1 : applyKeys(out[f - W], add);
+    plans.push(out);
+  }
+  return { W, L, plans };
+}
+
+/** 脉冲缩放/删除候选:e1<e2 是同键相邻翻转,脉冲长 dur = e2-e1:删掉、缩到一半、拉长 1.5 倍和 2 倍(只动后沿) */
+function scalePulseCandidates(best, bit, e1, e2, prev, next) {
+  const dur = e2 - e1, W = Math.max(0, e1 - 8), L = dur * 2 + 30, win = best.slice(W, W + L); const plans = [win]; const bg = best[e1 - 1] & bit, pm = best[e1] & bit;
+  for (const ne of [e1, e1 + Math.round(dur / 2), e1 + Math.round(dur * 1.5), e1 + dur * 2]) {
+    if (ne === e2) continue; const out = win.slice(); for (let f = e1; f < Math.min(W + L, Math.max(e2, ne)); f++) out[f - W] = (out[f - W] & ~bit) | (f < ne ? pm : bg);
+    if (ne > e2 && next != null && ne >= next) continue; plans.push(out);
+  }
+  return { W, L, plans };
+}
+
+/** 按 eval 的规则重建候选的完整逐帧按键:窗口 -> tailArr(直到越过闸门)-> post(按越过时刻对齐 + shift) */
+function rebuild(best, W, cand, tailArr, post, fc, sh, fin) {
+  const out = best.slice(0, W).concat(cand); const base = W + cand.length;
+  for (let f = base; f < fin; f++) {
+    if (fc > 0 && f >= fc) { const pi = f - fc + sh; out.push(pi >= 0 && pi < post.length ? post[pi] : 1); } else out.push(tailArr[f - base] ?? 1);
+  }
+  return out;
+}
+
+/** 游标之后(forward)或之前(backward)最近的一个(键, 翻转帧);pairMax = 把"下一个翻转"当作同一脉冲的最大间距 */
+function pickEvent(best, bestFin, cursor, dir, pairMax) {
+  let ev = null;
+  for (const bit of [1, 2, 4, 8]) {
+    const ed = keyEdges(best, bit); let i;
+    if (dir > 0) i = ed.findIndex((f) => f >= cursor);
+    else { i = -1; for (let k = ed.length - 1; k >= 0; k--) if (ed[k] <= cursor) { i = k; break; } }
+    if (i < 0) continue;
+    const better = !ev || (dir > 0 ? ed[i] < ev.tau : ed[i] > ev.tau);
+    if (better) ev = { bit, tau: ed[i], prev: i > 0 ? ed[i - 1] : 0, next: ed[i + 1] ?? bestFin, next2: ed[i + 2] ?? bestFin, pair: ed[i + 1] && ed[i + 1] - ed[i] <= pairMax ? ed[i + 1] : null };
+  }
+  return ev;
+}
+
+/**
+ * 打磨一份方案。
+ * @param g           游戏适配:makePool(n) / evalBatch(plans, opts) / commit(actions, seg, segs, reset)(Node:Playwright 里的 Game;页面:core.js 的 makeG)
+ * @param toggles     起点方案:5 个键的翻转帧列表(up,right,down,left,reset)
+ * @param finishFrames 起点的完成帧
+ * @param opts        {seconds, workers, batch, seed, from, late, rounds, gate, sweep, structural, random, order, log, shouldStop, onImprove}
+ *                    onImprove({ finishFrames, toggles }):每次接受改进后调用;shouldStop():返回 true 就在当前一步结束后收尾
+ * @returns { finishFrames, startFrames, toggles, iterations, improvements }(结果还没过游戏 Verify,调用方必须自己校验)
+ */
+async function polishPlan(g, toggles, finishFrames, { seconds = 60, workers = 4, batch = 64, seed = 1, from = 0, late = 0.25, rounds = 2, gate = true, sweep = true, structural = true, random = true, order = 'forward', log = () => {}, shouldStop = () => false, onImprove = () => {} } = {}) {
+  let best = Array.from(togglesToMasks(toggles, finishFrames)); let bestFin = finishFrames; const fin0 = bestFin;
+  const rng = mulberry32(seed); const t0 = Date.now();
+  const live = () => (Date.now() - t0) / 1000 < seconds && !shouldStop();
+  await g.makePool(workers);
+  const finishOf = async (m) => (await g.evalBatch([Array.from(m)], { seg: 1, tail: 1, maxFrames: m.length + 300 }))[0].fin;
+  const chk = await finishOf(best); if (chk !== bestFin) throw new Error(`起点复核不一致:方案声称 ${bestFin},引擎算得 ${chk}`);
+  log(`起点 ${bestFin} 帧 (${(bestFin / 1000).toFixed(3)} s),翻转 ${nToggles(best)} 次;${workers} 个评估线程,每批 ${batch} 个候选;闸门对齐 ${gate ? '开' : '关'};扫描顺序 ${order === 'backward' ? '从后往前' : '从前往后'}`);
+  // 当前最佳轨迹每 25 帧的位置(用来取闸门)
+  let pos = null;
+  const refreshPos = async () => { const at = []; for (let f = 25; f <= bestFin; f += 25) at.push(f); const [r] = await g.evalBatch([Array.from(best)], { seg: 1, tail: 1, maxFrames: bestFin + 300, sampleAt: at }); pos = new Map(r.smp.map((x) => [x[0], [x[5], x[6], x[7]]])); };
+  const gateAt = (G0) => { const a = pos.get(G0 - 25), b = pos.get(G0 + 25), p = pos.get(G0); if (!a || !b || !p) return null; const d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]]; const n = Math.hypot(...d); if (n < 1e-6) return null; return { p, d: d.map((x) => x / n) }; };
+  if (gate) await refreshPos();
+  let it = 0, acc = 0, ties = 0, framesSim = 0, gated = 0, gatedAcc = 0, rebuildFail = 0, sweepAcc = 0;
+  const emit = () => onImprove({ finishFrames: bestFin, toggles: masksToToggles(best) });
+  // ---- 1-opt 穷举扫描:每个键的每个翻转帧各平移若干个固定量,每个脉冲整体平移;先不带闸门、再带闸门各评一遍,有改进立刻接受 ----
+  const evalPlans = async (W, L, plans, useGate) => {
+    let gt = null, G0 = 0; if (useGate && gate) { G0 = Math.ceil((W + L + 600) / 25) * 25; if (G0 + 500 < bestFin) gt = gateAt(G0); }
+    await g.commit(best.slice(0, W), 1, null, true);
+    const tailArr = best.slice(W + L, gt ? G0 + 500 : bestFin); const post = gt ? best.slice(G0, bestFin) : null;
+    const res = await g.evalBatch(plans, { seg: 1, tail: 1, tailArr, maxFrames: bestFin - W + 300, fromCommit: true, ...(gt ? { gate: { p: gt.p, d: gt.d, post, shifts: plans.map(() => 0) } } : {}) });
+    framesSim += plans.length * (bestFin - W);
+    return { res, tailArr, post, gt, G0 };
+  };
+  const tryBatch = async (W, L, plans, what) => {
+    for (const useGate of [false, true]) {
+      if (useGate && (!gate || W + L + 1100 >= bestFin)) continue;
+      const { res, tailArr, post, gt, G0 } = await evalPlans(W, L, plans, useGate);
+      if (res[0].fin !== bestFin) { log(`  警告:扫描基线 ${res[0].fin} != ${bestFin}(${what} W=${W} gate=${useGate})`); continue; }
+      let bi = -1, bf = bestFin; for (let i = 1; i < res.length; i++) { const f = res[i].fin; if (f >= 0 && !res[i].dead && f < bf) { bi = i; bf = f; } }
+      if (bi < 0) continue;
+      const cand = rebuild(best, W, plans[bi], tailArr, post, res[bi].fc, 0, bf); const chk2 = await finishOf(cand);
+      if (chk2 !== bf) { rebuildFail++; continue; }
+      best = cand; bestFin = bf; acc++; sweepAcc++; if (gt) gatedAcc++;
+      log(`  [${((Date.now() - t0) / 1000) | 0}s] 扫描 ${what}: ${bestFin} 帧 (${(bestFin / 1000).toFixed(3)} s,比起点 -${fin0 - bestFin} 帧)${gt ? ` 闸门 ${G0} 越过 ${res[bi].fc}` : ''}`); emit(); if (gate) await refreshPos(); return true;
+    }
+    return false;
+  };
+  const back = order === 'backward';
+  if (sweep) {
+    const DS = [-12, -8, -6, -4, -3, -2, -1, 1, 2, 3, 4, 6, 8, 12], PDS = [-8, -4, -2, 2, 4, 8];
+    for (let sw = 1; live(); sw++) {
+      sweepAcc = 0; let cursor = back ? bestFin - 41 : Math.max(1, from); const tS = Date.now(); let nb = 0;
+      while (live() && (back ? cursor >= Math.max(1, from) : cursor < bestFin - 40)) {
+        const ev = pickEvent(best, bestFin, cursor, back ? -1 : 1, 150); if (!ev) break;
+        if (back && ev.tau >= bestFin - 40) { cursor = ev.tau - 1; continue; } // 终点附近的事件改了也不会更快,且越过终点会让候选无效
+        cursor = back ? ev.tau - 1 : ev.tau + 1; nb++;
+        let c = singleShiftCandidates(best, ev.bit, ev.tau, DS, ev.prev, ev.next); let ok = await tryBatch(c.W, c.L, c.plans, `键${ev.bit}@${ev.tau}`);
+        if (!ok && ev.pair) { c = pulseShiftCandidates(best, ev.bit, ev.tau, ev.pair, PDS, ev.prev, ev.next2); ok = await tryBatch(c.W, c.L, c.plans, `脉冲${ev.bit}@${ev.tau}`); }
+        if (ok) cursor = back ? Math.min(bestFin - 41, ev.tau + 20) : Math.max(1, ev.tau - 20); // 状态变了,往回退一点重扫
+      }
+      log(`  扫描第 ${sw} 遍:${nb} 个事件,${sweepAcc} 次改进,用时 ${((Date.now() - tS) / 1000) | 0}s;当前 ${bestFin} 帧`);
+      if (sweepAcc === 0) break; // 1-opt 局部最优
+    }
+  }
+
+  // ---- 结构性扫描:大幅平移 / 脉冲缩放删除 / 插入短脉冲 ----
+  const BIG = [-100, -60, -40, -25, -18, 18, 25, 40, 60, 100];
+  const runEvents = async (label, gen) => {
+    let cursor = back ? bestFin - 41 : 1; const tS = Date.now(); let nb = 0; sweepAcc = 0;
+    while (live() && (back ? cursor >= 1 : cursor < bestFin - 40)) {
+      const ev = pickEvent(best, bestFin, cursor, back ? -1 : 1, 200); if (!ev) break;
+      if (back && ev.tau >= bestFin - 40) { cursor = ev.tau - 1; continue; }
+      cursor = back ? ev.tau - 1 : ev.tau + 1; const c = gen(ev); if (!c) continue; nb++;
+      if (await tryBatch(c.W, c.L, c.plans, `${label}${ev.bit}@${ev.tau}`)) cursor = back ? Math.min(bestFin - 41, ev.tau + 20) : Math.max(1, ev.tau - 20);
+    }
+    log(`  ${label}扫描:${nb} 个事件,${sweepAcc} 次改进,用时 ${((Date.now() - tS) / 1000) | 0}s;当前 ${bestFin} 帧`);
+  };
+  if (structural) {
+    await runEvents('大幅平移', (ev) => bigShiftCandidates(best, ev.bit, ev.tau, BIG, ev.prev, ev.next));
+    await runEvents('脉冲缩放', (ev) => (ev.pair ? scalePulseCandidates(best, ev.bit, ev.tau, ev.pair, ev.prev, ev.next) : null));
+    { const tS = Date.now(); let nb = 0; sweepAcc = 0; for (let p = 120; p < bestFin - 300 && live(); p += 40) { nb++; const c = insertCandidates(best, p); if (await tryBatch(c.W, c.L, c.plans, `插入@${p}`)) p -= 40; } log(`  插入扫描:${nb} 个位置,${sweepAcc} 次改进,用时 ${((Date.now() - tS) / 1000) | 0}s;当前 ${bestFin} 帧`); }
+  }
+  while (random && live()) {
+    it++;
+    const span = bestFin - 80 - from; const W = from + (rng() < late ? Math.floor(span * (1 - rng() * rng())) : Math.floor(rng() * span)); const L = [60, 120, 200, 300, 500][Math.floor(rng() * 5)];
+    // 闸门:窗口之后 300~1500 帧处,且离终点至少 500 帧
+    let gt = null, G0 = 0; if (gate) { G0 = Math.ceil((W + L + 300 + Math.floor(rng() * 1200)) / 25) * 25; if (G0 + 500 < bestFin) gt = gateAt(G0); }
+    await g.commit(best.slice(0, W), 1, null, true);
+    for (let r = 0; r < rounds; r++) {
+      const win = best.slice(W, W + L); const plans = [win]; for (let b = 1; b < batch; b++) plans.push(mutateWin(win, rng));
+      const tailArr = best.slice(W + L, gt ? G0 + 500 : bestFin); const post = gt ? best.slice(G0, bestFin) : null;
+      const shifts = plans.map((_, i) => (gt && i > 0 && rng() < 0.5 ? Math.floor(rng() * 11) - 5 : 0));
+      const maxFrames = bestFin - W + 300;
+      // 注意:tailArr 与计划长度无关地接在每个计划后面(时间扭曲改变了窗口长度,恰好让它整体提前/推后)
+      const res = await g.evalBatch(plans, { seg: 1, tail: 1, tailArr, maxFrames, fromCommit: true, ...(gt ? { gate: { p: gt.p, d: gt.d, post, shifts } } : {}) });
+      framesSim += plans.length * (bestFin - W); if (gt) gated++;
+      if (res[0].fin !== bestFin) { log(`  警告:基线候选完成帧 ${res[0].fin} != ${bestFin}(W=${W} G0=${gt ? G0 : '-'});跳过本轮`); break; }
+      let bi = -1, bf = bestFin, bt = Infinity;
+      for (let i = 1; i < res.length; i++) { const f = res[i].fin; if (f < 0 || res[i].dead) continue; const tcount = nToggles(plans[i]); if (f < bf || (f === bf && bi >= 0 && tcount < bt)) { bi = i; bf = f; bt = tcount; } else if (bi < 0 && f === bestFin && tcount <= nToggles(win) && rng() < 0.1) { bi = i; bf = f; bt = tcount; } }
+      if (bi < 0) continue;
+      const cand = rebuild(best, W, plans[bi], tailArr, post, res[bi].fc, shifts[bi], bf);
+      const chk2 = await finishOf(cand); // 重建后整圈复核:必须与候选在 eval 里的完成帧一致
+      if (chk2 !== bf) { rebuildFail++; if (rebuildFail <= 5) log(`  警告:重建复核 ${chk2} != ${bf}(W=${W} fc=${res[bi].fc} sh=${shifts[bi]}),丢弃`); break; }
+      const improved = bf < bestFin; best = cand; bestFin = bf; if (improved) { acc++; if (gt) gatedAcc++; } else ties++;
+      if (improved) { log(`  [${((Date.now() - t0) / 1000) | 0}s] 轮 ${it}: ${bestFin} 帧 (${(bestFin / 1000).toFixed(3)} s,比起点 -${fin0 - bestFin} 帧),窗口 W=${W} L=${L}${gt ? ` 闸门 ${G0} 越过 ${res[bi].fc} 偏移 ${shifts[bi]}` : ''}`); emit(); if (gate) await refreshPos(); }
+      else if (gate) await refreshPos();
+      break; // 状态已变,重新取快照
+    }
+    if (it % 20 === 0) log(`  [${((Date.now() - t0) / 1000) | 0}s] 已做 ${it} 轮(带闸门 ${gated} 批),改进 ${acc} 次(带闸门 ${gatedAcc}),持平接受 ${ties},重建失败 ${rebuildFail};当前 ${bestFin} 帧;约 ${(framesSim / Math.max(1, (Date.now() - t0) / 1000) / 1000).toFixed(0)}k 帧/s`);
+  }
+  const chk3 = await finishOf(best); if (chk3 !== bestFin) log(`警告:整圈复核 ${chk3} != ${bestFin}`);
+  return { finishFrames: bestFin, startFrames: fin0, toggles: masksToToggles(best), iterations: it, improvements: acc, recheck: chk3 };
+}
+
 // Go-Explore 式探索:先找到"任意一条能冲线的路线",不依赖手工势场对"这条路走不走得通"的判断。
 // 动机(report 6.11):官方 summer2 / summer3 里有近乎垂直的墙 / 环形结构,格子势场表达不了,滚动时域规划器在那里停滞。
 //
@@ -849,7 +1093,7 @@ async function exploreLap(S, o = {}) {
   return { masks, finishFrames: best.fin };
 }
 
-return { Solver, masksToToggles, togglesToMasks, buildProgress, buildProgressField, buildTrajectoryProgress, exploreLap };
+return { Solver, masksToToggles, togglesToMasks, buildProgress, buildProgressField, buildTrajectoryProgress, exploreLap, polishPlan };
 })();
 window.__ptSolver = __ptSolverMod;
 window.__ptGuideMath = (() => {
@@ -1088,15 +1332,19 @@ return { GUIDE_STEP, GUIDE_DEFAULTS, buildGuidePath, projectGuide, mulMat4, clip
 // 做了什么:
 //  1. 把游戏自己的物理 Worker 换成"打过补丁的 blob"(补丁 = 虚拟时钟 + 批量评估引擎,在你自己的浏览器里内存中完成,不写盘);
 //  2. 时钟推进器:没开自动驾驶时,按真实时间把虚拟时钟推进给 Worker,游戏照常可玩;
-//  3. 求解(规划 + 打磨 + 游戏自带 Verify)直接在页面里跑,结果按赛道缓存;
+//  3. 规划(第一次点击时,按这个顺序,谁先成谁用):
+//       a. 已有现成方案(内置 / 本机导入 / 浏览器缓存)而且不慢于榜单第 1 名 → 直接用,什么都不算;
+//       b. 否则取榜单第 1 名的回放(只读),过游戏自带 Verify,再在页面里微调(每次接受都用真实完成帧、最后再过 Verify),结果存进本赛道缓存,下次直接用;
+//       c. 榜单读不到 / 没有第 1 名 / 回放校验不过 → 从零求解(滚动时域规划 + 探索式兜底 + 打磨 + Verify),同样存缓存;
 //  4. 自动驾驶:在精确的物理帧注入键盘事件(帧号来自求解结果),所以每次开的结果和求解时逐帧一致;
-//  5. 不拦成绩提交:扩展不包装任何网络 API,上传与否完全由游戏结算界面决定。
+//  5. 网络:扩展只做两种只读 GET(vps.kodub.com 的榜单 / 回放接口,不带令牌,和游戏自己看榜单发的同类请求),从不 POST、不上传任何成绩,
+//     也不包装游戏的任何网络 API;成绩是否上传完全由游戏结算界面决定。
 (() => {
   const PT = window.__pt;
   const SOLVER = window.__ptSolver; // { Solver }
   const GUIDE = window.__ptGuideMath, GUIDEUI = window.__ptGuideUI; // 引导线(见 extension/src/guide.js)
   const GAME_BASE = 'https://app-polytrack.kodub.com/0.6.3/';
-  const WORKER_SHIM = "// 在物理 Worker 脚本最前面注入(由 harness 在浏览器侧、内存中拼接,不落盘、不分发游戏文件)。\n// 作用:把 Worker 里的 performance.now / Date.now / requestAnimationFrame / setTimeout / setInterval\n// 换成由主线程消息驱动的\"虚拟时钟\"。游戏自己的物理循环代码保持原样,只是时间由我们推进。\n(() => {\n  const g = self;\n  let vnow = 0;\n  const T0 = 1.7e12;\n  let nid = 1;\n  let rafQ = [];\n  const timers = new Map(); // id -> {fn, due, every}\n  Object.defineProperty(g.performance, 'now', { value: () => vnow, configurable: true, writable: true });\n  Date.now = () => Math.floor(T0 + vnow);\n  g.requestAnimationFrame = (cb) => { const id = nid++; rafQ.push([id, cb]); return id; };\n  g.cancelAnimationFrame = (id) => { rafQ = rafQ.filter((e) => e[0] !== id); };\n  g.setTimeout = (fn, ms = 0, ...a) => { const id = nid++; timers.set(id, { fn: () => fn(...a), due: vnow + Math.max(0, ms), every: 0 }); return id; };\n  g.setInterval = (fn, ms = 0, ...a) => { const id = nid++; const e = Math.max(1e-3, ms); timers.set(id, { fn: () => fn(...a), due: vnow + e, every: e }); return id; };\n  g.clearTimeout = g.clearInterval = (id) => { timers.delete(id); };\n\n  function tick() {\n    for (const [id, t] of [...timers]) {\n      if (!timers.has(id) || t.due > vnow) continue;\n      if (t.every) t.due = vnow + t.every; else timers.delete(id);\n      t.fn();\n    }\n    const q = rafQ; rafQ = [];\n    for (const [, cb] of q) cb(vnow);\n  }\n  g.addEventListener('message', (ev) => {\n    const d = ev.data;\n    if (!d || typeof d !== 'object' || !d.__vt) return;\n    ev.stopImmediatePropagation();\n    if (d.__vt === 'advance') {\n      // 以固定步长 d.step(ms)推进 d.ms 毫秒虚拟时间;每个步长触发一次到期定时器 + 一轮 rAF 回调\n      let rem = d.ms;\n      const step = d.step > 0 ? d.step : 1000 / 60;\n      while (rem > 1e-9) { const dt = Math.min(step, rem); vnow += dt; rem -= dt; tick(); }\n      g.postMessage({ __vt: 'done', id: d.id, vnow });\n    } else if (d.__vt === 'track') {\n      // 仅在 harness 以 exposeTrack 打补丁时可用:self.__Ko / self.__ho 由补丁暴露\n      const Ko = g.__Ko, ho = g.__ho;\n      if (!Ko || !ho) { g.postMessage({ __vt: 'track', id: d.id, error: 'internals not exposed' }); return; }\n      const tr = Ko.fromSaveString(d.trackData);\n      const parts = [];\n      tr.forEachPart((x, y, z, partId, rotation, axis, color, cpOrder, startOrder) => {\n        const cfg = ho.find((c) => c.id === partId); const cells = [];\n        if (cfg) cfg.tiles.rotated(rotation, axis).forEach((a, b, c2) => cells.push([x + a, y + b, z + c2]));\n        parts.push({ x, y, z, partId, rotation, axis, color, cpOrder, startOrder, category: cfg?.category, cells });\n      });\n      const st = tr.getStartTransform();\n      const info = {};\n      for (const p of parts) {\n        if (info[p.partId]) continue;\n        const cfg = ho.find((c) => c.id === p.partId);\n        const tiles = []; if (cfg) cfg.tiles.rotated(0, 0).forEach((a, b, c2) => tiles.push([a, b, c2]));\n        info[p.partId] = { category: cfg?.category, detector: cfg?.detector ? JSON.parse(JSON.stringify(cfg.detector)) : null, startOffset: cfg?.startOffset ? JSON.parse(JSON.stringify(cfg.startOffset)) : null, tilesUnrotated: tiles };\n      }\n      g.postMessage({ __vt: 'track', id: d.id, parts, info, start: st ? { position: { x: st.position.x, y: st.position.y, z: st.position.z }, quaternion: { x: st.quaternion.x, y: st.quaternion.y, z: st.quaternion.z, w: st.quaternion.w } } : null });\n    } else if (d.__vt === 'catalog') {\n      // 仅在 exposeTrack 补丁下可用:列出全部部件配置(id、类别、未旋转的占格、检测器、起点偏移),用于设计赛道\n      const ho = g.__ho;\n      if (!ho) { g.postMessage({ __vt: 'catalog', id: d.id, error: 'internals not exposed' }); return; }\n      const parts = ho.map((cfg) => { const tiles = []; cfg.tiles.rotated(0, 0).forEach((a, b, c) => tiles.push([a, b, c])); const rot = [1, 2, 3].map((r) => { const o = []; cfg.tiles.rotated(r, 0).forEach((a, b, c) => o.push([a, b, c])); return o; }); return { id: cfg.id, category: cfg.category, tiles, rot, detector: cfg.detector ? JSON.parse(JSON.stringify(cfg.detector)) : null, startOffset: cfg.startOffset ? JSON.parse(JSON.stringify(cfg.startOffset)) : null }; });\n      g.postMessage({ __vt: 'catalog', id: d.id, parts });\n    } else if (d.__vt === 'build') {\n      // 用游戏自己的赛道类生成一条我们自己设计的测试赛道,返回存档串与导出串(PolyTrack2...)\n      const Ko = g.__Ko;\n      if (!Ko) { g.postMessage({ __vt: 'build', id: d.id, error: 'internals not exposed' }); return; }\n      const base = Ko.fromSaveString(d.baseTrackData);\n      const tr = new Ko(base.environment, base.sunDirection);\n      for (const p of d.parts) tr.addPart(p.x, p.y, p.z, p.partId, p.rotation, p.axis ?? 0, p.color ?? 0, p.cpOrder ?? null, p.startOrder ?? null);\n      g.postMessage({ __vt: 'build', id: d.id, save: tr.toSaveString(), exportString: tr.toExportString({ name: d.name, author: null, lastModified: null }), start: (() => { const s = tr.getStartTransform(); return s ? { position: { x: s.position.x, y: s.position.y, z: s.position.z }, quaternion: { x: s.quaternion.x, y: s.quaternion.y, z: s.quaternion.z, w: s.quaternion.w } } : null; })() });\n    } else if (d.__vt === 'now') {\n      g.postMessage({ __vt: 'now', id: d.id, vnow });\n    }\n  });\n})();\n";
+  const WORKER_SHIM = "// 在物理 Worker 脚本最前面注入(由 harness 在浏览器侧、内存中拼接,不落盘、不分发游戏文件)。\n// 作用:把 Worker 里的 performance.now / Date.now / requestAnimationFrame / setTimeout / setInterval\n// 换成由主线程消息驱动的\"虚拟时钟\"。游戏自己的物理循环代码保持原样,只是时间由我们推进。\n(() => {\n  const g = self;\n  let vnow = 0;\n  const T0 = 1.7e12;\n  let nid = 1;\n  let rafQ = [];\n  const timers = new Map(); // id -> {fn, due, every}\n  Object.defineProperty(g.performance, 'now', { value: () => vnow, configurable: true, writable: true });\n  Date.now = () => Math.floor(T0 + vnow);\n  g.requestAnimationFrame = (cb) => { const id = nid++; rafQ.push([id, cb]); return id; };\n  g.cancelAnimationFrame = (id) => { rafQ = rafQ.filter((e) => e[0] !== id); };\n  g.setTimeout = (fn, ms = 0, ...a) => { const id = nid++; timers.set(id, { fn: () => fn(...a), due: vnow + Math.max(0, ms), every: 0 }); return id; };\n  g.setInterval = (fn, ms = 0, ...a) => { const id = nid++; const e = Math.max(1e-3, ms); timers.set(id, { fn: () => fn(...a), due: vnow + e, every: e }); return id; };\n  g.clearTimeout = g.clearInterval = (id) => { timers.delete(id); };\n\n  function tick() {\n    for (const [id, t] of [...timers]) {\n      if (!timers.has(id) || t.due > vnow) continue;\n      if (t.every) t.due = vnow + t.every; else timers.delete(id);\n      t.fn();\n    }\n    const q = rafQ; rafQ = [];\n    for (const [, cb] of q) cb(vnow);\n  }\n  g.addEventListener('message', (ev) => {\n    const d = ev.data;\n    if (!d || typeof d !== 'object' || !d.__vt) return;\n    ev.stopImmediatePropagation();\n    if (d.__vt === 'advance') {\n      // 以固定步长 d.step(ms)推进 d.ms 毫秒虚拟时间;每个步长触发一次到期定时器 + 一轮 rAF 回调\n      let rem = d.ms;\n      const step = d.step > 0 ? d.step : 1000 / 60;\n      while (rem > 1e-9) { const dt = Math.min(step, rem); vnow += dt; rem -= dt; tick(); }\n      g.postMessage({ __vt: 'done', id: d.id, vnow });\n    } else if (d.__vt === 'track') {\n      // 仅在 harness 以 exposeTrack 打补丁时可用:self.__Ko / self.__ho 由补丁暴露\n      const Ko = g.__Ko, ho = g.__ho;\n      if (!Ko || !ho) { g.postMessage({ __vt: 'track', id: d.id, error: 'internals not exposed' }); return; }\n      const tr = Ko.fromSaveString(d.trackData);\n      const parts = [];\n      tr.forEachPart((x, y, z, partId, rotation, axis, color, cpOrder, startOrder) => {\n        const cfg = ho.find((c) => c.id === partId); const cells = [];\n        if (cfg) cfg.tiles.rotated(rotation, axis).forEach((a, b, c2) => cells.push([x + a, y + b, z + c2]));\n        parts.push({ x, y, z, partId, rotation, axis, color, cpOrder, startOrder, category: cfg?.category, cells });\n      });\n      const st = tr.getStartTransform();\n      const info = {};\n      for (const p of parts) {\n        if (info[p.partId]) continue;\n        const cfg = ho.find((c) => c.id === p.partId);\n        const tiles = []; if (cfg) cfg.tiles.rotated(0, 0).forEach((a, b, c2) => tiles.push([a, b, c2]));\n        info[p.partId] = { category: cfg?.category, detector: cfg?.detector ? JSON.parse(JSON.stringify(cfg.detector)) : null, startOffset: cfg?.startOffset ? JSON.parse(JSON.stringify(cfg.startOffset)) : null, tilesUnrotated: tiles };\n      }\n      // trackId:游戏自己的 Track.getId()(赛道内容的 SHA-256,64 位十六进制)= 榜单 / 回放接口里的 trackId;只读榜单时用它定位赛道\n      let trackId = null; try { trackId = tr.getId(); } catch { /* 取不到就当没有 */ }\n      g.postMessage({ __vt: 'track', id: d.id, trackId, parts, info, start: st ? { position: { x: st.position.x, y: st.position.y, z: st.position.z }, quaternion: { x: st.quaternion.x, y: st.quaternion.y, z: st.quaternion.z, w: st.quaternion.w } } : null });\n    } else if (d.__vt === 'catalog') {\n      // 仅在 exposeTrack 补丁下可用:列出全部部件配置(id、类别、未旋转的占格、检测器、起点偏移),用于设计赛道\n      const ho = g.__ho;\n      if (!ho) { g.postMessage({ __vt: 'catalog', id: d.id, error: 'internals not exposed' }); return; }\n      const parts = ho.map((cfg) => { const tiles = []; cfg.tiles.rotated(0, 0).forEach((a, b, c) => tiles.push([a, b, c])); const rot = [1, 2, 3].map((r) => { const o = []; cfg.tiles.rotated(r, 0).forEach((a, b, c) => o.push([a, b, c])); return o; }); return { id: cfg.id, category: cfg.category, tiles, rot, detector: cfg.detector ? JSON.parse(JSON.stringify(cfg.detector)) : null, startOffset: cfg.startOffset ? JSON.parse(JSON.stringify(cfg.startOffset)) : null }; });\n      g.postMessage({ __vt: 'catalog', id: d.id, parts });\n    } else if (d.__vt === 'build') {\n      // 用游戏自己的赛道类生成一条我们自己设计的测试赛道,返回存档串与导出串(PolyTrack2...)\n      const Ko = g.__Ko;\n      if (!Ko) { g.postMessage({ __vt: 'build', id: d.id, error: 'internals not exposed' }); return; }\n      const base = Ko.fromSaveString(d.baseTrackData);\n      const tr = new Ko(base.environment, base.sunDirection);\n      for (const p of d.parts) tr.addPart(p.x, p.y, p.z, p.partId, p.rotation, p.axis ?? 0, p.color ?? 0, p.cpOrder ?? null, p.startOrder ?? null);\n      g.postMessage({ __vt: 'build', id: d.id, save: tr.toSaveString(), exportString: tr.toExportString({ name: d.name, author: null, lastModified: null }), start: (() => { const s = tr.getStartTransform(); return s ? { position: { x: s.position.x, y: s.position.y, z: s.position.z }, quaternion: { x: s.quaternion.x, y: s.quaternion.y, z: s.quaternion.z, w: s.quaternion.w } } : null; })() });\n    } else if (d.__vt === 'now') {\n      g.postMessage({ __vt: 'now', id: d.id, vnow });\n    }\n  });\n})();\n";
   const EVAL_CASES = "case 101:self.__ev={trk:Ko.fromSaveString(r.trackData),mv:r.mountainVertices,mo:r.mountainOffset,snap:null,snap0:null,f:0};\nself.__dec=function(u,f){const dv=new DataView(u.buffer,u.byteOffset,u.byteLength);const fl=u[11];let o=12,fin=-1;if(fl&2){fin=u[o]|u[o+1]<<8|u[o+2]<<16;o+=3}\nconst cp=dv.getUint16(o,true);o+=2;return[f,dv.getFloat32(7,true),fl,fin,cp,dv.getFloat32(o,true),dv.getFloat32(o+4,true),dv.getFloat32(o+8,true),dv.getFloat32(o+12,true),dv.getFloat32(o+16,true),dv.getFloat32(o+20,true),dv.getFloat32(o+24,true)]};\npostMessage({__vt:\"prep\",id:r.id});break;\ncase 103:postMessage({__vt:\"probe\",id:r.id,heap:t.HEAPU8.length});break;\ncase 102:!function(e){\nconst V=self.__ev,seg=e.seg||1,dec=self.__dec;let u=null,f=0;\nif(!V.snap0){s(1,V.mv,new R(V.mo.x,V.mo.y,V.mo.z),V.trk,V.trk.getStartTransform());V.snap0=t.HEAPU8.slice()}\nif(V.snap&&!e.reset){t.HEAPU8.set(V.snap);f=V.f}else{t.HEAPU8.set(V.snap0);f=0}\nconst h={id:1};let fin=-1;\nfor(let ai=0;ai<e.actions.length;ai++){const m=e.actions[ai],sg=e.segs?e.segs[ai]:seg;for(let j=0;j<sg;j++){u=new Uint8Array(n(h,{up:!!(m&1),right:!!(m&2),down:!!(m&4),left:!!(m&8),reset:!!(m&16)}));f++;if(u[11]&2){fin=u[12]|u[13]<<8|u[14]<<16;break}}if(fin>=0)break}\nV.snap=t.HEAPU8.slice();V.f=f;\npostMessage({__vt:\"commit\",id:e.id,frames:f,fin:fin,last:u?dec(u,f):null})}(r);break;\ncase 100:!function(e){\nconst V=self.__ev,dec=self.__dec,out=[];\nconst maxF=Math.min(e.maxFrames||60000,5999999),se=e.sampleEvery|0,seg=e.seg||1,tail=e.tail|0,minY=e.minY==null?-1e9:e.minY;\nlet bd=null;if(e.segs){bd=[];let c=0;for(const x of e.segs){c+=x;bd.push(c)}}\nconst smpAt=e.sampleAt?new Set(e.sampleAt):null;const TA=e.tailArr||null;\nconst CS=e.crashStop||null;const hist=CS?new Float32Array(CS.w|0||50):null;\nlet st=null;\nif(!e.fromCommit)st=V.trk.getStartTransform();else{if(!V.snap0){s(1,V.mv,new R(V.mo.x,V.mo.y,V.mo.z),V.trk,V.trk.getStartTransform());V.snap0=t.HEAPU8.slice()}if(!V.snap){V.snap=V.snap0;V.f=0}}\nfor(let k=0;k<e.plans.length;k++){\nconst plan=e.plans[k],id=e.fromCommit?1:e.carIdBase+k;\nlet f0=0;\nif(e.fromCommit){t.HEAPU8.set(V.snap);f0=V.f}else s(id,V.mv,new R(V.mo.x,V.mo.y,V.mo.z),V.trk,st);\nconst h={id};let f=f0,u=null,fin=-1,dead=false,ai=0,crashed=false;const smp=[];\nconst GT=e.gate||null;let crossed=false,fc=0;const sh=GT&&GT.shifts?(GT.shifts[k]|0):0;\nfor(;f<f0+maxF;f++){\nlet a;if(bd){while(ai<bd.length&&f-f0>=bd[ai])ai++;a=ai}else a=((f-f0)/seg)|0;let m=a<plan.length?plan[a]:(TA?(TA[a-plan.length]??tail):tail);\nif(crossed){const pi=f-fc+sh;m=(pi>=0&&pi<GT.post.length)?GT.post[pi]:tail}\nu=new Uint8Array(n(h,{up:!!(m&1),right:!!(m&2),down:!!(m&4),left:!!(m&8),reset:!!(m&16)}));\nif(u[11]&2){fin=u[12]|u[13]<<8|u[14]<<16;f++;break}\nif(CS){const sp=new DataView(u.buffer,u.byteOffset,u.byteLength).getFloat32(7,true),k=(f-f0)%hist.length,old=hist[k];hist[k]=sp;if(f-f0>=hist.length&&old-sp>CS.drop&&old>CS.minV){crashed=true;f++;break}}\nif(GT&&!crossed&&a>=plan.length){const dv=new DataView(u.buffer);if((dv.getFloat32(14,true)-GT.p[0])*GT.d[0]+(dv.getFloat32(18,true)-GT.p[1])*GT.d[1]+(dv.getFloat32(22,true)-GT.p[2])*GT.d[2]>=0){crossed=true;fc=f+1}}\nif(smpAt?smpAt.has(f+1-f0):(se&&(f+1-f0)%se===0))smp.push(dec(u,f+1));\nif(minY>-1e8&&new DataView(u.buffer).getFloat32(18,true)<minY){dead=true;f++;break}}\nlet extra=0;\nif(e.airMax&&fin<0&&!dead&&!crashed&&((u[11]>>3)&15)===0){const am=e.airTail|0,settle=e.airSettle==null?100:e.airSettle;let landed=0;\nwhile(extra<e.airMax){const w=(u[11]>>3)&15;if(w>0){landed++;if(landed>settle)break}else landed=0;\nu=new Uint8Array(n(h,{up:!!(am&1),right:!!(am&2),down:!!(am&4),left:!!(am&8),reset:false}));f++;extra++;\nif(u[11]&2){fin=u[12]|u[13]<<8|u[14]<<16;break}\nif(minY>-1e8&&new DataView(u.buffer).getFloat32(18,true)<minY){dead=true;break}}}\nif(!e.fromCommit)t.ccall(\"deleteCarModel\",\"void\",[\"number\"],[id]);\nout.push({frames:f,fin:fin,dead:dead,crashed:crashed,last:dec(u,f),smp:smp,extra:extra,fc:crossed?fc:0})}\npostMessage({__vt:\"eval\",id:e.id,results:out})}(r);break;\n";
   const POTENTIAL = 'field';
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -1161,6 +1409,21 @@ return { GUIDE_STEP, GUIDE_DEFAULTS, buildGuidePath, projectGuide, mulMat4, clip
     return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   }
 
+  /** 回放串 -> 5 个键的翻转帧列表(与 pt_codec.decodeRecording 同格式;解不开就抛错,调用方当作"这条回放不能用") */
+  async function decodeRecordingWeb(str) {
+    const bin = atob(String(str).replace(/-/g, '+').replace(/_/g, '/')); const z = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) z[i] = bin.charCodeAt(i);
+    const raw = new Uint8Array(await new Response(new Blob([z]).stream().pipeThrough(new DecompressionStream('deflate'))).arrayBuffer());
+    const lists = []; let off = 0;
+    for (let k = 0; k < 5; k++) {
+      if (off + 3 > raw.length) throw new Error('回放数据不完整');
+      const n = raw[off] | (raw[off + 1] << 8) | (raw[off + 2] << 16); off += 3;
+      if (off + 3 * n > raw.length) throw new Error('回放数据不完整');
+      const list = []; for (let j = 0; j < n; j++) { const d = raw[off] | (raw[off + 1] << 8) | (raw[off + 2] << 16); off += 3; list.push(j === 0 ? d : list[j - 1] + d); }
+      lists.push(list);
+    }
+    return lists;
+  }
+
   // ================= 4. 缓存 =================
   function hashTrack(td) {
     let h = 2166136261 >>> 0; const n = td.length;
@@ -1175,13 +1438,17 @@ return { GUIDE_STEP, GUIDE_DEFAULTS, buildGuidePath, projectGuide, mulMat4, clip
   /** 本地缓存与内置方案里取更快的那个(都要求已通过 Verify;没有 verified 标记的本地方案也保留,但排在内置之后) */
   // 只在本机用的方案(例如榜单第 1 名回放打底的):由 extension/plans/local.json 在本机构建时内联;该文件被 .gitignore,不进仓库,公开构建(--public)里是空的。
   const LOCAL_SEED = {};
-  const loadPlan = (id) => {
+  const BUILD = {"t":"11-16 18:57","local":0}; // { t: 构建时间, local: 本机方案条数 }
+  const isPlan = (p) => !!p && Number.isFinite(p.finishFrames) && p.finishFrames > 0 && typeof p.recording === 'string'; // 缓存损坏 / 旧格式的不参与比较,免得 sort 的比较器出 NaN
+  /** 这条赛道所有可用来源的方案(内置 / 本机导入 / 浏览器缓存),按完成帧从快到慢;同帧数时内置优先(sort 稳定) */
+  const planCandidates = (id) => {
     const loc = loadLocal(id);
-    const b = BUNDLED[id] ? { ...BUNDLED[id], verified: true, bundled: true } : null;
-    const sd = LOCAL_SEED[id] ? { v: 1, ...LOCAL_SEED[id], verified: true } : null;
-    const best = [b, sd, loc && loc.verified ? loc : null].filter(Boolean).sort((x, y) => x.finishFrames - y.finishFrames)[0]; // 同帧数时内置优先(sort 稳定)
-    return best ?? loc;
+    const b = BUNDLED[id] ? { ...BUNDLED[id], verified: true, bundled: true, from: '内置' } : null;
+    const sd = LOCAL_SEED[id] ? { v: 1, ...LOCAL_SEED[id], verified: true, from: '本机导入' } : null;
+    const lc = loc && loc.verified ? { ...loc, from: '浏览器缓存' } : null;
+    return [b, sd, lc].filter(isPlan).sort((x, y) => x.finishFrames - y.finishFrames);
   };
+  const loadPlan = (id) => planCandidates(id)[0] ?? loadLocal(id);
   const savePlan = (id, p) => { try { localStorage.setItem(cacheKey(id), JSON.stringify(p)); } catch { /* 无痕等场景下存不了:本次仍可用 */ } };
   const clearPlan = (id) => { try { localStorage.removeItem(cacheKey(id)); } catch { /* ignore */ } };
 
@@ -1223,6 +1490,92 @@ return { GUIDE_STEP, GUIDE_DEFAULTS, buildGuidePath, projectGuide, mulMat4, clip
     } finally {
       for (const p of PT.pool) p.w.terminate(); PT.pool = []; S.solving = false;
     }
+  }
+
+  // ================= 5b. 规划总入口:现成方案 → 榜单第 1 名回放 + 微调 → 从零求解 =================
+  // 只读:GET vps.kodub.com/v6/leaderboard 与 /v6/recordings(游戏自己看榜单时发的同类请求),不带任何令牌 / cookie,从不 POST。
+  const LB_BASE = 'https://vps.kodub.com/v6/';
+  const POLISH_DEFAULT_S = 120;
+  /** 微调预算(秒):S.polishSeconds > localStorage['ptai:polish'] > 默认 120;0 = 只取榜单回放、不微调 */
+  const polishBudget = () => { if (Number.isFinite(S.polishSeconds) && S.polishSeconds >= 0) return S.polishSeconds; try { const v = localStorage.getItem('ptai:polish'); if (v != null && v !== '' && Number.isFinite(Number(v)) && Number(v) >= 0) return Number(v); } catch { /* ignore */ } return POLISH_DEFAULT_S; };
+  const secStr = (frames) => (frames / 1000).toFixed(3) + ' s';
+  async function lbGet(path) {
+    const ac = new AbortController(); const to = setTimeout(() => ac.abort(), 12000);
+    try { const r = await fetch(LB_BASE + path, { method: 'GET', credentials: 'omit', cache: 'no-store', signal: ac.signal }); if (!r.ok) throw new Error('HTTP ' + r.status); return await r.json(); } finally { clearTimeout(to); }
+  }
+  const trackId64Cache = new Map();
+  /** 榜单用的赛道编号(64 位十六进制):由游戏自己的赛道解析器(Worker 里的 Track.getId())算出,按赛道指纹缓存 */
+  async function trackId64(src, id) {
+    if (trackId64Cache.has(id)) return trackId64Cache.get(id);
+    const ti = await makeG(src).trackInfo(); const tid = ti && !ti.error && /^[0-9a-f]{64}$/.test(ti.trackId || '') ? ti.trackId : null;
+    if (tid) trackId64Cache.set(id, tid); return tid;
+  }
+  /** 榜单第 1 名(只看已验证的)的完成帧 + 回放串;没有 / 数据不对就返回 null */
+  async function fetchTop1(tid) {
+    const lb = await lbGet(`leaderboard?version=0.6.3&trackId=${tid}&skip=0&amount=1&onlyVerified=true`);
+    const e = lb && Array.isArray(lb.entries) ? lb.entries[0] : null;
+    if (!e || !Number.isInteger(e.frames) || e.frames <= 0 || e.id == null) return null;
+    const rec = await lbGet(`recordings?version=0.6.3&ids=${encodeURIComponent(String(e.id))}`);
+    const recording = Array.isArray(rec) && rec[0] ? rec[0].recording : null;
+    return typeof recording === 'string' && recording ? { frames: e.frames, recording } : null;
+  }
+  const verifyExact = async (g, rec, fin) => { const at = await g.verify(rec, fin, 1); const m1 = await g.verify(rec, fin - 1, 1); const p1 = await g.verify(rec, fin + 1, 1); return at[0].result === true && m1[0].result === false && p1[0].result === false; };
+
+  /** 榜单第 1 名回放当起点:先过游戏 Verify 并立刻存进缓存,再在页面里微调(预算 polishBudget() 秒),改进过 Verify 后覆盖缓存。返回方案;回放不能用就返回 null */
+  async function deriveFromTop(ui, id, src, top, existing) {
+    const g = makeG(src); const secs = polishBudget(); const t0 = Date.now();
+    S.solving = true; S.cancel = false; ui.busy('solve'); ui.bar(0);
+    try {
+      ui.status(`榜单第 1 名 ${secStr(top.frames)}:用游戏自带 Verify 复核它的回放…`);
+      let toggles; try { toggles = await decodeRecordingWeb(top.recording); } catch (e) { ui.log('回放解码失败:' + String(e.message).slice(0, 60)); return null; }
+      const v0 = await g.verify(top.recording, top.frames, 1); const v1 = await g.verify(top.recording, top.frames - 1, 1);
+      if (!(v0[0].result === true && v1[0].result === false)) { ui.log('这条回放在当前赛道上没通过游戏的 Verify,不用'); return null; }
+      let plan = { v: 1, finishFrames: top.frames, toggles, recording: top.recording, verified: true, source: '榜单第 1 名回放(只读取得)', solvedAt: Date.now() };
+      if (!existing || plan.finishFrames < existing.finishFrames) savePlan(id, plan); // 先存下来:微调到一半关页面也不会白等
+      ui.log(`回放通过 Verify:${secStr(top.frames)},已存进缓存`);
+      if (secs > 0 && !S.cancel) {
+        const workers = Math.max(2, Math.min(6, (navigator.hardwareConcurrency || 4) - 2)); const tP = Date.now(); let now = top.frames;
+        const paint = () => { const el = (Date.now() - tP) / 1000; ui.bar(Math.min(100, (100 * el) / secs)); ui.status(`微调榜单第 1 名的回放:${secStr(now)}(榜单 ${secStr(top.frames)},已快 ${top.frames - now} 帧),还剩约 ${Math.max(0, Math.round(secs - el))} s`); };
+        paint(); const timer = setInterval(paint, 400);
+        try {
+          const r = await SOLVER.polishPlan(g, toggles, top.frames, { seconds: secs, workers, order: 'backward', random: false, log: (m) => ui.log(m), shouldStop: () => S.cancel, onImprove: (x) => { now = x.finishFrames; } });
+          if (r.finishFrames < top.frames) {
+            ui.status('微调完成,用游戏自带 Verify 复核…');
+            const rec = await encodeRecordingWeb(r.toggles);
+            if (await verifyExact(g, rec, r.finishFrames)) {
+              plan = { v: 1, finishFrames: r.finishFrames, toggles: r.toggles, recording: rec, verified: true, source: `榜单第 1 名回放 + 页面内微调(快 ${top.frames - r.finishFrames} 帧)`, solvedAt: Date.now(), solveSeconds: Math.round((Date.now() - t0) / 1000) };
+              savePlan(id, plan); ui.log(`微调:${secStr(top.frames)} → ${secStr(r.finishFrames)}(快 ${top.frames - r.finishFrames} 帧),Verify 通过,已存进缓存`);
+            } else ui.log('微调结果没通过 Verify,仍用榜单回放原样(已存)');
+          } else ui.log(`微调 ${secs} s 没找到更快的改法,用榜单回放原样(已存)`);
+        } finally { clearInterval(timer); }
+      }
+      return plan;
+    } finally { for (const p of PT.pool) p.w.terminate(); PT.pool = []; S.solving = false; }
+  }
+
+  /**
+   * 规划总入口(点击时调用):
+   *  1. 已有现成方案,且不慢于榜单第 1 名(或者榜单读不到)→ 直接用,不算;
+   *  2. 否则取榜单第 1 名回放,过 Verify 后微调,存缓存(下次走 1);
+   *  3. 榜单没有 / 回放不能用 / 出错 → 已有方案就用它,没有就从零求解(solve)。
+   */
+  async function obtainPlan(ui, id) {
+    const src = primaryIdx(); if (src < 0) throw new Error('游戏还没准备好(先选好赛道、看到起点画面)');
+    const have = planCandidates(id)[0] ?? null; let top = null, note = '';
+    ui.status('对照榜单第 1 名,看现成方案够不够快…');
+    try { const tid = await trackId64(src, id); if (!tid) note = '读不到赛道编号'; else { top = await fetchTop1(tid); if (!top) note = '榜单上没有可用的第 1 名'; } } catch (e) { note = '榜单读取失败(' + String(e.message || e).slice(0, 40) + ')'; }
+    if (have && (!top || have.finishFrames <= top.frames)) { ui.log(top ? `现成方案 ${secStr(have.finishFrames)}(${have.from})不慢于榜单第 1 名 ${secStr(top.frames)},不用重算` : `${note};直接用现成方案 ${secStr(have.finishFrames)}`); return { plan: have, canceled: false }; }
+    if (top) {
+      ui.log(`榜单第 1 名 ${secStr(top.frames)},${have ? '比现成方案 ' + secStr(have.finishFrames) + ' 快' : '本赛道还没有方案'} → 取它的回放来微调`);
+      let p = null; try { p = await deriveFromTop(ui, id, src, top, have); } catch (e) { if (S.cancel) throw e; ui.log('取榜单回放出错:' + String(e.message || e).slice(0, 80)); }
+      const canceled = S.cancel;
+      if (p && (!have || p.finishFrames < have.finishFrames)) return { plan: p, canceled };
+      if (have) return { plan: have, canceled };
+    } else ui.log(note + ',改用现成方案或从零求解');
+    if (have) return { plan: have, canceled: false };
+    const old = loadLocal(id); if (isPlan(old)) return { plan: old, canceled: false }; // 以前求解但没通过 Verify 的方案:和过去一样照用
+    ui.busy('solve'); ui.bar(0);
+    return { plan: await solve(ui), canceled: false };
   }
 
   // ================= 6. 自动驾驶 =================
@@ -1338,7 +1691,7 @@ return { GUIDE_STEP, GUIDE_DEFAULTS, buildGuidePath, projectGuide, mulMat4, clip
       <div class="row"><button id="clr" tabindex="-1">清除本赛道缓存</button><button id="cp" tabindex="-1">复制回放串</button></div>
       <div class="log" id="log"></div>
       <div class="hk" id="hk"></div>
-      <div class="ft" id="ft">成绩是否上传由游戏结算界面决定,扩展不介入网络请求。</div></div>`;
+      <div class="ft" id="ft">只读榜单、从不上传成绩;成绩是否上传由游戏结算界面决定。</div></div>`;
     document.documentElement.appendChild(host);
     const $ = (id) => root.getElementById(id);
     for (const b of root.querySelectorAll('button')) b.addEventListener('mousedown', (e) => e.preventDefault()); // 不抢键盘焦点(否则 Enter / 空格会触发按钮)
@@ -1348,7 +1701,7 @@ return { GUIDE_STEP, GUIDE_DEFAULTS, buildGuidePath, projectGuide, mulMat4, clip
       log: (t) => { lines.push(t); if (lines.length > 40) lines.shift(); $('log').textContent = lines.slice(-6).join('\n'); $('log').scrollTop = 1e9; },
       drive: (f, total) => { $('bar').style.width = Math.min(100, (100 * f) / total) + '%'; $('st').textContent = `自动驾驶中 ${(f / 1000).toFixed(2)} s / ${(total / 1000).toFixed(2)} s`; },
       busy: (mode) => { const b = $('go'); b.className = mode === 'idle' ? '' : mode === 'solve' ? 'busy' : 'stop'; b.textContent = mode === 'idle' ? '▶ 一键自动驾驶' : mode === 'solve' ? '■ 取消求解' : '■ 停止(交还给我)'; },
-      foot: () => { $('ft').textContent = '成绩是否上传由游戏结算界面决定,扩展不介入网络请求。'; },
+      foot: () => { $('ft').textContent = `构建 ${BUILD.t} · ${BUILD.local ? '本机方案 ' + BUILD.local + ' 条' : '公开版'} · 只读榜单、从不上传成绩;成绩是否上传由游戏结算界面决定。`; },
       bar: (p) => { $('bar').style.width = p + '%'; },
       hint: (t) => { $('hk').textContent = t; },
       setPanel: (on) => { host.style.display = on ? '' : 'none'; },
@@ -1436,8 +1789,8 @@ return { GUIDE_STEP, GUIDE_DEFAULTS, buildGuidePath, projectGuide, mulMat4, clip
       const id = curTrackId();
       if (!id) { ui.status('等待游戏就绪:请先选好赛道,看到起点画面'); return; }
       if (sticky && sticky.id === id) { ui.status(sticky.text); return; }
-      const p = loadPlan(id);
-      ui.status(p ? `本赛道已有方案:${(p.finishFrames / 1000).toFixed(3)} s${p.bundled ? '(内置方案' + (p.name ? ':' + p.name : '') + ',已通过游戏 Verify)' : p.source ? '(本地导入:' + p.source + (p.verified ? ',已通过游戏 Verify)' : ',未验证)') : p.verified ? '(已通过游戏 Verify)' : ''}` : '本赛道还没有方案:点击后先求解(几分钟),再自动驾驶');
+      const cands = planCandidates(id); const p = cands[0] ?? loadLocal(id); const others = cands.slice(1).map((x) => `${x.from} ${(x.finishFrames / 1000).toFixed(3)} s`);
+      ui.status(p ? `本赛道已有方案:${(p.finishFrames / 1000).toFixed(3)} s${p.bundled ? '(内置方案' + (p.name ? ':' + p.name : '') + ',已通过游戏 Verify)' : p.source ? '(本地导入:' + p.source + (p.verified ? ',已通过游戏 Verify)' : ',未验证)') : p.verified ? '(已通过游戏 Verify)' : ''}${others.length ? ' · 另有 ' + others.join('、') : ''}` : '本赛道还没有方案:点击后先取榜单第 1 名的回放并微调(约 ' + Math.max(1, Math.round(polishBudget() / 60)) + ' 分钟),取不到再从零求解;之后自动驾驶,下次直接开');
     };
     setInterval(refresh, 1000);
     ui.hint('` 自动驾驶 · \\ 显示/隐藏面板   (Mac 上也可 fn+F8 / fn+F9)');
@@ -1450,11 +1803,11 @@ return { GUIDE_STEP, GUIDE_DEFAULTS, buildGuidePath, projectGuide, mulMat4, clip
       running = true; sticky = null; // 面板状态保持原样:隐藏着启动自动驾驶就不弹出来,用快捷键照样能停
       try {
         const id = curTrackId(); if (!id) { ui.status('游戏还没准备好'); return; }
-        let plan = loadPlan(id);
-        if (!plan) {
-          ui.busy('solve'); ui.bar(0);
-          try { plan = await solve(ui); } catch (e) { ui.status('求解失败:' + e.message); ui.log('求解失败: ' + e.message); sticky = { id, text: '求解失败:' + e.message }; ui.busy('idle'); return; }
-        }
+        let plan; // 现成方案够快就直接用;否则取榜单第 1 名回放微调;再不行从零求解(见 obtainPlan)
+        try {
+          const r = await obtainPlan(ui, id); plan = r.plan;
+          if (r.canceled) { const text = `已取消微调:方案 ${(plan.finishFrames / 1000).toFixed(3)} s 已存好,再点一次直接开`; sticky = { id, text }; ui.status(text); ui.bar(0); ui.busy('idle'); return; }
+        } catch (e) { ui.status('求解失败:' + e.message); ui.log('求解失败: ' + e.message); sticky = { id, text: '求解失败:' + e.message }; ui.busy('idle'); return; }
         ui.busy('drive'); ui.status('自动驾驶:回到起点并出发…');
         const r = await drive(plan, ui);
         const text = r.finished != null ? `完成:${(r.finished / 1000).toFixed(3)} s(方案 ${(plan.finishFrames / 1000).toFixed(3)} s)` : '已停止';
@@ -1475,7 +1828,7 @@ return { GUIDE_STEP, GUIDE_DEFAULTS, buildGuidePath, projectGuide, mulMat4, clip
     installInputLock();
     ui.$('clr').addEventListener('click', () => { const id = curTrackId(); if (id) { clearPlan(id); ui.log('已清除本赛道缓存'); } });
     ui.$('cp').addEventListener('click', async () => { const id = curTrackId(); const p = id && loadPlan(id); if (!p) { ui.log('本赛道还没有方案'); return; } try { await navigator.clipboard.writeText(p.recording); ui.log('回放串已复制'); } catch { ui.log('复制失败(浏览器不允许)'); } });
-    window.__ptai = { PT, S, prepareGuide, solve: (o) => solve(ui, o), drive: (p) => drive(p, ui), loadPlan, savePlan, curTrackId, primaryIdx, ui };
+    window.__ptai = { PT, S, prepareGuide, solve: (o) => solve(ui, o), obtainPlan: (id) => obtainPlan(ui, id ?? curTrackId()), fetchTop1, trackId64: () => trackId64(primaryIdx(), curTrackId()), planCandidates, drive: (p) => drive(p, ui), loadPlan, savePlan, curTrackId, primaryIdx, ui };
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();

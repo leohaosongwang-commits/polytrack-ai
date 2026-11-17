@@ -4,9 +4,13 @@
 // 做了什么:
 //  1. 把游戏自己的物理 Worker 换成"打过补丁的 blob"(补丁 = 虚拟时钟 + 批量评估引擎,在你自己的浏览器里内存中完成,不写盘);
 //  2. 时钟推进器:没开自动驾驶时,按真实时间把虚拟时钟推进给 Worker,游戏照常可玩;
-//  3. 求解(规划 + 打磨 + 游戏自带 Verify)直接在页面里跑,结果按赛道缓存;
+//  3. 规划(第一次点击时,按这个顺序,谁先成谁用):
+//       a. 已有现成方案(内置 / 本机导入 / 浏览器缓存)而且不慢于榜单第 1 名 → 直接用,什么都不算;
+//       b. 否则取榜单第 1 名的回放(只读),过游戏自带 Verify,再在页面里微调(每次接受都用真实完成帧、最后再过 Verify),结果存进本赛道缓存,下次直接用;
+//       c. 榜单读不到 / 没有第 1 名 / 回放校验不过 → 从零求解(滚动时域规划 + 探索式兜底 + 打磨 + Verify),同样存缓存;
 //  4. 自动驾驶:在精确的物理帧注入键盘事件(帧号来自求解结果),所以每次开的结果和求解时逐帧一致;
-//  5. 不拦成绩提交:扩展不包装任何网络 API,上传与否完全由游戏结算界面决定。
+//  5. 网络:扩展只做两种只读 GET(vps.kodub.com 的榜单 / 回放接口,不带令牌,和游戏自己看榜单发的同类请求),从不 POST、不上传任何成绩,
+//     也不包装游戏的任何网络 API;成绩是否上传完全由游戏结算界面决定。
 (() => {
   const PT = window.__pt;
   const SOLVER = window.__ptSolver; // { Solver }
@@ -77,6 +81,21 @@
     return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   }
 
+  /** 回放串 -> 5 个键的翻转帧列表(与 pt_codec.decodeRecording 同格式;解不开就抛错,调用方当作"这条回放不能用") */
+  async function decodeRecordingWeb(str) {
+    const bin = atob(String(str).replace(/-/g, '+').replace(/_/g, '/')); const z = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) z[i] = bin.charCodeAt(i);
+    const raw = new Uint8Array(await new Response(new Blob([z]).stream().pipeThrough(new DecompressionStream('deflate'))).arrayBuffer());
+    const lists = []; let off = 0;
+    for (let k = 0; k < 5; k++) {
+      if (off + 3 > raw.length) throw new Error('回放数据不完整');
+      const n = raw[off] | (raw[off + 1] << 8) | (raw[off + 2] << 16); off += 3;
+      if (off + 3 * n > raw.length) throw new Error('回放数据不完整');
+      const list = []; for (let j = 0; j < n; j++) { const d = raw[off] | (raw[off + 1] << 8) | (raw[off + 2] << 16); off += 3; list.push(j === 0 ? d : list[j - 1] + d); }
+      lists.push(list);
+    }
+    return lists;
+  }
+
   // ================= 4. 缓存 =================
   function hashTrack(td) {
     let h = 2166136261 >>> 0; const n = td.length;
@@ -91,13 +110,17 @@
   /** 本地缓存与内置方案里取更快的那个(都要求已通过 Verify;没有 verified 标记的本地方案也保留,但排在内置之后) */
   // 只在本机用的方案(例如榜单第 1 名回放打底的):由 extension/plans/local.json 在本机构建时内联;该文件被 .gitignore,不进仓库,公开构建(--public)里是空的。
   const LOCAL_SEED = __LOCAL_PLANS__;
-  const loadPlan = (id) => {
+  const BUILD = __BUILD_INFO__; // { t: 构建时间, local: 本机方案条数 }
+  const isPlan = (p) => !!p && Number.isFinite(p.finishFrames) && p.finishFrames > 0 && typeof p.recording === 'string'; // 缓存损坏 / 旧格式的不参与比较,免得 sort 的比较器出 NaN
+  /** 这条赛道所有可用来源的方案(内置 / 本机导入 / 浏览器缓存),按完成帧从快到慢;同帧数时内置优先(sort 稳定) */
+  const planCandidates = (id) => {
     const loc = loadLocal(id);
-    const b = BUNDLED[id] ? { ...BUNDLED[id], verified: true, bundled: true } : null;
-    const sd = LOCAL_SEED[id] ? { v: 1, ...LOCAL_SEED[id], verified: true } : null;
-    const best = [b, sd, loc && loc.verified ? loc : null].filter(Boolean).sort((x, y) => x.finishFrames - y.finishFrames)[0]; // 同帧数时内置优先(sort 稳定)
-    return best ?? loc;
+    const b = BUNDLED[id] ? { ...BUNDLED[id], verified: true, bundled: true, from: '内置' } : null;
+    const sd = LOCAL_SEED[id] ? { v: 1, ...LOCAL_SEED[id], verified: true, from: '本机导入' } : null;
+    const lc = loc && loc.verified ? { ...loc, from: '浏览器缓存' } : null;
+    return [b, sd, lc].filter(isPlan).sort((x, y) => x.finishFrames - y.finishFrames);
   };
+  const loadPlan = (id) => planCandidates(id)[0] ?? loadLocal(id);
   const savePlan = (id, p) => { try { localStorage.setItem(cacheKey(id), JSON.stringify(p)); } catch { /* 无痕等场景下存不了:本次仍可用 */ } };
   const clearPlan = (id) => { try { localStorage.removeItem(cacheKey(id)); } catch { /* ignore */ } };
 
@@ -139,6 +162,92 @@
     } finally {
       for (const p of PT.pool) p.w.terminate(); PT.pool = []; S.solving = false;
     }
+  }
+
+  // ================= 5b. 规划总入口:现成方案 → 榜单第 1 名回放 + 微调 → 从零求解 =================
+  // 只读:GET vps.kodub.com/v6/leaderboard 与 /v6/recordings(游戏自己看榜单时发的同类请求),不带任何令牌 / cookie,从不 POST。
+  const LB_BASE = 'https://vps.kodub.com/v6/';
+  const POLISH_DEFAULT_S = 120;
+  /** 微调预算(秒):S.polishSeconds > localStorage['ptai:polish'] > 默认 120;0 = 只取榜单回放、不微调 */
+  const polishBudget = () => { if (Number.isFinite(S.polishSeconds) && S.polishSeconds >= 0) return S.polishSeconds; try { const v = localStorage.getItem('ptai:polish'); if (v != null && v !== '' && Number.isFinite(Number(v)) && Number(v) >= 0) return Number(v); } catch { /* ignore */ } return POLISH_DEFAULT_S; };
+  const secStr = (frames) => (frames / 1000).toFixed(3) + ' s';
+  async function lbGet(path) {
+    const ac = new AbortController(); const to = setTimeout(() => ac.abort(), 12000);
+    try { const r = await fetch(LB_BASE + path, { method: 'GET', credentials: 'omit', cache: 'no-store', signal: ac.signal }); if (!r.ok) throw new Error('HTTP ' + r.status); return await r.json(); } finally { clearTimeout(to); }
+  }
+  const trackId64Cache = new Map();
+  /** 榜单用的赛道编号(64 位十六进制):由游戏自己的赛道解析器(Worker 里的 Track.getId())算出,按赛道指纹缓存 */
+  async function trackId64(src, id) {
+    if (trackId64Cache.has(id)) return trackId64Cache.get(id);
+    const ti = await makeG(src).trackInfo(); const tid = ti && !ti.error && /^[0-9a-f]{64}$/.test(ti.trackId || '') ? ti.trackId : null;
+    if (tid) trackId64Cache.set(id, tid); return tid;
+  }
+  /** 榜单第 1 名(只看已验证的)的完成帧 + 回放串;没有 / 数据不对就返回 null */
+  async function fetchTop1(tid) {
+    const lb = await lbGet(`leaderboard?version=0.6.3&trackId=${tid}&skip=0&amount=1&onlyVerified=true`);
+    const e = lb && Array.isArray(lb.entries) ? lb.entries[0] : null;
+    if (!e || !Number.isInteger(e.frames) || e.frames <= 0 || e.id == null) return null;
+    const rec = await lbGet(`recordings?version=0.6.3&ids=${encodeURIComponent(String(e.id))}`);
+    const recording = Array.isArray(rec) && rec[0] ? rec[0].recording : null;
+    return typeof recording === 'string' && recording ? { frames: e.frames, recording } : null;
+  }
+  const verifyExact = async (g, rec, fin) => { const at = await g.verify(rec, fin, 1); const m1 = await g.verify(rec, fin - 1, 1); const p1 = await g.verify(rec, fin + 1, 1); return at[0].result === true && m1[0].result === false && p1[0].result === false; };
+
+  /** 榜单第 1 名回放当起点:先过游戏 Verify 并立刻存进缓存,再在页面里微调(预算 polishBudget() 秒),改进过 Verify 后覆盖缓存。返回方案;回放不能用就返回 null */
+  async function deriveFromTop(ui, id, src, top, existing) {
+    const g = makeG(src); const secs = polishBudget(); const t0 = Date.now();
+    S.solving = true; S.cancel = false; ui.busy('solve'); ui.bar(0);
+    try {
+      ui.status(`榜单第 1 名 ${secStr(top.frames)}:用游戏自带 Verify 复核它的回放…`);
+      let toggles; try { toggles = await decodeRecordingWeb(top.recording); } catch (e) { ui.log('回放解码失败:' + String(e.message).slice(0, 60)); return null; }
+      const v0 = await g.verify(top.recording, top.frames, 1); const v1 = await g.verify(top.recording, top.frames - 1, 1);
+      if (!(v0[0].result === true && v1[0].result === false)) { ui.log('这条回放在当前赛道上没通过游戏的 Verify,不用'); return null; }
+      let plan = { v: 1, finishFrames: top.frames, toggles, recording: top.recording, verified: true, source: '榜单第 1 名回放(只读取得)', solvedAt: Date.now() };
+      if (!existing || plan.finishFrames < existing.finishFrames) savePlan(id, plan); // 先存下来:微调到一半关页面也不会白等
+      ui.log(`回放通过 Verify:${secStr(top.frames)},已存进缓存`);
+      if (secs > 0 && !S.cancel) {
+        const workers = Math.max(2, Math.min(6, (navigator.hardwareConcurrency || 4) - 2)); const tP = Date.now(); let now = top.frames;
+        const paint = () => { const el = (Date.now() - tP) / 1000; ui.bar(Math.min(100, (100 * el) / secs)); ui.status(`微调榜单第 1 名的回放:${secStr(now)}(榜单 ${secStr(top.frames)},已快 ${top.frames - now} 帧),还剩约 ${Math.max(0, Math.round(secs - el))} s`); };
+        paint(); const timer = setInterval(paint, 400);
+        try {
+          const r = await SOLVER.polishPlan(g, toggles, top.frames, { seconds: secs, workers, order: 'backward', random: false, log: (m) => ui.log(m), shouldStop: () => S.cancel, onImprove: (x) => { now = x.finishFrames; } });
+          if (r.finishFrames < top.frames) {
+            ui.status('微调完成,用游戏自带 Verify 复核…');
+            const rec = await encodeRecordingWeb(r.toggles);
+            if (await verifyExact(g, rec, r.finishFrames)) {
+              plan = { v: 1, finishFrames: r.finishFrames, toggles: r.toggles, recording: rec, verified: true, source: `榜单第 1 名回放 + 页面内微调(快 ${top.frames - r.finishFrames} 帧)`, solvedAt: Date.now(), solveSeconds: Math.round((Date.now() - t0) / 1000) };
+              savePlan(id, plan); ui.log(`微调:${secStr(top.frames)} → ${secStr(r.finishFrames)}(快 ${top.frames - r.finishFrames} 帧),Verify 通过,已存进缓存`);
+            } else ui.log('微调结果没通过 Verify,仍用榜单回放原样(已存)');
+          } else ui.log(`微调 ${secs} s 没找到更快的改法,用榜单回放原样(已存)`);
+        } finally { clearInterval(timer); }
+      }
+      return plan;
+    } finally { for (const p of PT.pool) p.w.terminate(); PT.pool = []; S.solving = false; }
+  }
+
+  /**
+   * 规划总入口(点击时调用):
+   *  1. 已有现成方案,且不慢于榜单第 1 名(或者榜单读不到)→ 直接用,不算;
+   *  2. 否则取榜单第 1 名回放,过 Verify 后微调,存缓存(下次走 1);
+   *  3. 榜单没有 / 回放不能用 / 出错 → 已有方案就用它,没有就从零求解(solve)。
+   */
+  async function obtainPlan(ui, id) {
+    const src = primaryIdx(); if (src < 0) throw new Error('游戏还没准备好(先选好赛道、看到起点画面)');
+    const have = planCandidates(id)[0] ?? null; let top = null, note = '';
+    ui.status('对照榜单第 1 名,看现成方案够不够快…');
+    try { const tid = await trackId64(src, id); if (!tid) note = '读不到赛道编号'; else { top = await fetchTop1(tid); if (!top) note = '榜单上没有可用的第 1 名'; } } catch (e) { note = '榜单读取失败(' + String(e.message || e).slice(0, 40) + ')'; }
+    if (have && (!top || have.finishFrames <= top.frames)) { ui.log(top ? `现成方案 ${secStr(have.finishFrames)}(${have.from})不慢于榜单第 1 名 ${secStr(top.frames)},不用重算` : `${note};直接用现成方案 ${secStr(have.finishFrames)}`); return { plan: have, canceled: false }; }
+    if (top) {
+      ui.log(`榜单第 1 名 ${secStr(top.frames)},${have ? '比现成方案 ' + secStr(have.finishFrames) + ' 快' : '本赛道还没有方案'} → 取它的回放来微调`);
+      let p = null; try { p = await deriveFromTop(ui, id, src, top, have); } catch (e) { if (S.cancel) throw e; ui.log('取榜单回放出错:' + String(e.message || e).slice(0, 80)); }
+      const canceled = S.cancel;
+      if (p && (!have || p.finishFrames < have.finishFrames)) return { plan: p, canceled };
+      if (have) return { plan: have, canceled };
+    } else ui.log(note + ',改用现成方案或从零求解');
+    if (have) return { plan: have, canceled: false };
+    const old = loadLocal(id); if (isPlan(old)) return { plan: old, canceled: false }; // 以前求解但没通过 Verify 的方案:和过去一样照用
+    ui.busy('solve'); ui.bar(0);
+    return { plan: await solve(ui), canceled: false };
   }
 
   // ================= 6. 自动驾驶 =================
@@ -254,7 +363,7 @@
       <div class="row"><button id="clr" tabindex="-1">清除本赛道缓存</button><button id="cp" tabindex="-1">复制回放串</button></div>
       <div class="log" id="log"></div>
       <div class="hk" id="hk"></div>
-      <div class="ft" id="ft">成绩是否上传由游戏结算界面决定,扩展不介入网络请求。</div></div>`;
+      <div class="ft" id="ft">只读榜单、从不上传成绩;成绩是否上传由游戏结算界面决定。</div></div>`;
     document.documentElement.appendChild(host);
     const $ = (id) => root.getElementById(id);
     for (const b of root.querySelectorAll('button')) b.addEventListener('mousedown', (e) => e.preventDefault()); // 不抢键盘焦点(否则 Enter / 空格会触发按钮)
@@ -264,7 +373,7 @@
       log: (t) => { lines.push(t); if (lines.length > 40) lines.shift(); $('log').textContent = lines.slice(-6).join('\n'); $('log').scrollTop = 1e9; },
       drive: (f, total) => { $('bar').style.width = Math.min(100, (100 * f) / total) + '%'; $('st').textContent = `自动驾驶中 ${(f / 1000).toFixed(2)} s / ${(total / 1000).toFixed(2)} s`; },
       busy: (mode) => { const b = $('go'); b.className = mode === 'idle' ? '' : mode === 'solve' ? 'busy' : 'stop'; b.textContent = mode === 'idle' ? '▶ 一键自动驾驶' : mode === 'solve' ? '■ 取消求解' : '■ 停止(交还给我)'; },
-      foot: () => { $('ft').textContent = '成绩是否上传由游戏结算界面决定,扩展不介入网络请求。'; },
+      foot: () => { $('ft').textContent = `构建 ${BUILD.t} · ${BUILD.local ? '本机方案 ' + BUILD.local + ' 条' : '公开版'} · 只读榜单、从不上传成绩;成绩是否上传由游戏结算界面决定。`; },
       bar: (p) => { $('bar').style.width = p + '%'; },
       hint: (t) => { $('hk').textContent = t; },
       setPanel: (on) => { host.style.display = on ? '' : 'none'; },
@@ -352,8 +461,8 @@
       const id = curTrackId();
       if (!id) { ui.status('等待游戏就绪:请先选好赛道,看到起点画面'); return; }
       if (sticky && sticky.id === id) { ui.status(sticky.text); return; }
-      const p = loadPlan(id);
-      ui.status(p ? `本赛道已有方案:${(p.finishFrames / 1000).toFixed(3)} s${p.bundled ? '(内置方案' + (p.name ? ':' + p.name : '') + ',已通过游戏 Verify)' : p.source ? '(本地导入:' + p.source + (p.verified ? ',已通过游戏 Verify)' : ',未验证)') : p.verified ? '(已通过游戏 Verify)' : ''}` : '本赛道还没有方案:点击后先求解(几分钟),再自动驾驶');
+      const cands = planCandidates(id); const p = cands[0] ?? loadLocal(id); const others = cands.slice(1).map((x) => `${x.from} ${(x.finishFrames / 1000).toFixed(3)} s`);
+      ui.status(p ? `本赛道已有方案:${(p.finishFrames / 1000).toFixed(3)} s${p.bundled ? '(内置方案' + (p.name ? ':' + p.name : '') + ',已通过游戏 Verify)' : p.source ? '(本地导入:' + p.source + (p.verified ? ',已通过游戏 Verify)' : ',未验证)') : p.verified ? '(已通过游戏 Verify)' : ''}${others.length ? ' · 另有 ' + others.join('、') : ''}` : '本赛道还没有方案:点击后先取榜单第 1 名的回放并微调(约 ' + Math.max(1, Math.round(polishBudget() / 60)) + ' 分钟),取不到再从零求解;之后自动驾驶,下次直接开');
     };
     setInterval(refresh, 1000);
     ui.hint('` 自动驾驶 · \\ 显示/隐藏面板   (Mac 上也可 fn+F8 / fn+F9)');
@@ -366,11 +475,11 @@
       running = true; sticky = null; // 面板状态保持原样:隐藏着启动自动驾驶就不弹出来,用快捷键照样能停
       try {
         const id = curTrackId(); if (!id) { ui.status('游戏还没准备好'); return; }
-        let plan = loadPlan(id);
-        if (!plan) {
-          ui.busy('solve'); ui.bar(0);
-          try { plan = await solve(ui); } catch (e) { ui.status('求解失败:' + e.message); ui.log('求解失败: ' + e.message); sticky = { id, text: '求解失败:' + e.message }; ui.busy('idle'); return; }
-        }
+        let plan; // 现成方案够快就直接用;否则取榜单第 1 名回放微调;再不行从零求解(见 obtainPlan)
+        try {
+          const r = await obtainPlan(ui, id); plan = r.plan;
+          if (r.canceled) { const text = `已取消微调:方案 ${(plan.finishFrames / 1000).toFixed(3)} s 已存好,再点一次直接开`; sticky = { id, text }; ui.status(text); ui.bar(0); ui.busy('idle'); return; }
+        } catch (e) { ui.status('求解失败:' + e.message); ui.log('求解失败: ' + e.message); sticky = { id, text: '求解失败:' + e.message }; ui.busy('idle'); return; }
         ui.busy('drive'); ui.status('自动驾驶:回到起点并出发…');
         const r = await drive(plan, ui);
         const text = r.finished != null ? `完成:${(r.finished / 1000).toFixed(3)} s(方案 ${(plan.finishFrames / 1000).toFixed(3)} s)` : '已停止';
@@ -391,7 +500,7 @@
     installInputLock();
     ui.$('clr').addEventListener('click', () => { const id = curTrackId(); if (id) { clearPlan(id); ui.log('已清除本赛道缓存'); } });
     ui.$('cp').addEventListener('click', async () => { const id = curTrackId(); const p = id && loadPlan(id); if (!p) { ui.log('本赛道还没有方案'); return; } try { await navigator.clipboard.writeText(p.recording); ui.log('回放串已复制'); } catch { ui.log('复制失败(浏览器不允许)'); } });
-    window.__ptai = { PT, S, prepareGuide, solve: (o) => solve(ui, o), drive: (p) => drive(p, ui), loadPlan, savePlan, curTrackId, primaryIdx, ui };
+    window.__ptai = { PT, S, prepareGuide, solve: (o) => solve(ui, o), obtainPlan: (id) => obtainPlan(ui, id ?? curTrackId()), fetchTop1, trackId64: () => trackId64(primaryIdx(), curTrackId()), planCandidates, drive: (p) => drive(p, ui), loadPlan, savePlan, curTrackId, primaryIdx, ui };
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();

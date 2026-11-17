@@ -3,7 +3,12 @@
 // 用法:node scripts/test_extension.mjs [--track scripts/data/slalom.txt | --game-track summer3] [--plan out/mac_slalom.json] [--headed] [--shots 目录 [--shot-every 4]] [--timeout 600] [--no-click]
 //   --track  用我们自己的赛道替换官方默认赛道(只在内存里替换);不给则用官方 Summer 1
 //   --plan   把这份结果 JSON 预先放进缓存(跳过求解,直接测自动驾驶);不给则点击后在页面里求解
-// 为了不向游戏服务器发任何东西:测试里对 vps.kodub.com 的全部请求一律 abort,并统计页面**尝试**发出的写入类请求(扩展本身不拦截网络,所以游戏自己的成绩上传会被尝试,但全部被这里的 route.abort() 拦下,没有一个真的到达服务器)。
+//   --lb-mock 方案.json   扩展的"取榜单第 1 名回放"读到的是这份方案(完成帧 + 回放串),不联网;不给则榜单请求照旧全部 abort(= 榜单读不到,走旧流程)
+//   --lb-live             榜单两个只读接口(/v6/leaderboard、/v6/recordings 的 GET)放行到真实服务器,其余一律 abort
+//   --build 路径          用另一份构建产物(例如 build_extension.mjs --public --no-bundled --out 生成的"没有任何现成方案"版)
+//   --polish 秒           把页面内微调的预算改成这么多秒(默认 120);0 = 只取榜单回放、不微调
+//   --twice               第一次完成后在同一页再点一次(回起点后再开):应当直接用刚存进缓存的方案、不再取榜单 / 微调;并打印缓存里的方案
+// 为了不向游戏服务器发任何东西:测试里对 vps.kodub.com 的请求一律 abort(只有上面两个榜单只读 GET 在 --lb-mock / --lb-live 下例外),并统计页面**尝试**发出的写入类请求(扩展本身不拦截网络,所以游戏自己的成绩上传会被尝试,但全部被这里的 route.abort() 拦下,没有一个真的到达服务器)。
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -22,15 +27,27 @@ const timeoutS = Number(a.timeout ?? 600);
 const browser = await chromium.launch({ ...(process.env.PT_CHROME === '' ? {} : { channel: 'chrome' }), headless: !a.headed, args: ['--autoplay-policy=no-user-gesture-required'] });
 const ctx = await browser.newContext({ viewport: { width: Number(a.width ?? 1280), height: Number(a.height ?? 720) } });
 let vpsWrites = 0; const vpsSeen = [];
+const lbMock = a['lb-mock'] ? (() => { const j0 = JSON.parse(fs.readFileSync(a['lb-mock'], 'utf8')); return j0.plan ?? j0; })() : null;
+const CORS = { 'access-control-allow-origin': '*' };
 await ctx.route('**/*', async (route) => {
   const req = route.request(); const u = new URL(req.url());
-  if (u.hostname === 'vps.kodub.com') { vpsSeen.push(req.method() + ' ' + u.pathname); if (req.method() !== 'GET') vpsWrites++; return route.abort(); }
+  if (u.hostname === 'vps.kodub.com') {
+    vpsSeen.push(req.method() + ' ' + u.pathname + (u.pathname.endsWith('/leaderboard') ? ' trackId=' + (u.searchParams.get('trackId') || '').slice(0, 12) : ''));
+    if (req.method() !== 'GET') vpsWrites++;
+    const readOnlyLb = req.method() === 'GET' && (u.pathname === '/v6/leaderboard' || u.pathname === '/v6/recordings');
+    if (readOnlyLb && lbMock) {
+      if (u.pathname === '/v6/leaderboard') return route.fulfill({ status: 200, contentType: 'application/json', headers: CORS, body: JSON.stringify({ total: 1, entries: [{ id: 'mock-1', nickname: 'mock', frames: lbMock.finishFrames, verifiedState: 1 }] }) });
+      return route.fulfill({ status: 200, contentType: 'application/json', headers: CORS, body: JSON.stringify([{ recording: lbMock.recording }]) });
+    }
+    if (readOnlyLb && a['lb-live']) return route.continue();
+    return route.abort();
+  }
   if (!req.url().startsWith(GAME_BASE)) return route.abort();
   if (track && req.url().split('?')[0].endsWith('tracks/official/summer1.track')) return route.fulfill({ status: 200, contentType: 'text/plain', body: track });
   if (a['game-track'] && req.url().split('?')[0].endsWith('tracks/official/summer1.track')) return route.fulfill({ response: await route.fetch({ url: GAME_BASE + 'tracks/official/' + a['game-track'] + '.track' }) }); // 用官方的另一条赛道顶替 summer1(只在内存里转手)
   return route.continue();
 });
-await ctx.addInitScript({ content: fs.readFileSync(path.join(ROOT, 'extension/autopilot.js'), 'utf8') });
+await ctx.addInitScript({ content: fs.readFileSync(a.build && a.build !== true ? a.build : path.join(ROOT, 'extension/autopilot.js'), 'utf8') });
 const page = await ctx.newPage();
 const errors = []; page.on('pageerror', (e) => errors.push(String(e.message).slice(0, 300)));
 page.on('console', (m) => { if (m.type() === 'error' || /ptai|PolyTrack AI/.test(m.text())) console.log('[console.' + m.type() + ']', m.text().slice(0, 200)); });
@@ -51,6 +68,8 @@ if (a.plan) {
   await page.evaluate((p) => window.__ptai.savePlan(window.__ptai.curTrackId(), { v: 1, finishFrames: p.finishFrames, toggles: p.toggles, recording: p.recording, verified: true, solvedAt: Date.now(), ...(p.source ? { source: p.source } : {}) }), j);
   console.log('已把', a.plan, '放进缓存(', j.finishFrames, '帧 )');
 }
+await new Promise((r2) => setTimeout(r2, 1500)); // 等面板的 1 s 刷新一轮
+console.log('面板:', JSON.stringify(await page.evaluate(() => ({ status: window.__ptai.ui.$('st').textContent, footer: window.__ptai.ui.$('ft').textContent }))));
 if (a['no-click']) { await browser.close(); process.exit(0); }
 async function clickAndWait(label) {
   await page.locator('#ptai-panel button#go').click();
@@ -62,13 +81,18 @@ async function clickAndWait(label) {
     if (!st) continue;
     if (st.st !== lastSt) { console.log(`[${((Date.now() - tStart) / 1000).toFixed(0)}s] ${st.st}   (${st.log})`); lastSt = st.st; }
     if (a.shots && n++ % Number(a['shot-every'] ?? 4) === 0) await shot(label.replace(/\W/g, '') + 'run_' + String(n).padStart(3, '0'));
-    if (/^完成|^求解失败|^出错|^已停止/.test(st.st)) return st.st;
+    if (/^完成|^求解失败|^出错|^已停止|^已取消/.test(st.st)) return st.st;
     if ((Date.now() - tStart) / 1000 > timeoutS) return 'timeout';
   }
 }
-await page.evaluate(() => { window.__ptai.S.debugKeys = true; }); // 记录每个循环里 物理侧按键位 与 方案按键位,结束后核对按键显示的数据源
+await page.evaluate((p) => { window.__ptai.S.debugKeys = true; if (p != null) window.__ptai.S.polishSeconds = Number(p); }, a.polish ?? null); // 记录每个循环里 物理侧按键位 与 方案按键位,结束后核对按键显示的数据源
 let outcome = await clickAndWait('');
-if (a.twice && /^完成/.test(outcome)) { await new Promise((r2) => setTimeout(r2, 1500)); const o2 = await clickAndWait('(第二次:先按 T 回起点)'); outcome = outcome + ' | 第二次: ' + o2; }
+if (a.twice && /^完成/.test(outcome)) {
+  const cached = await ui(() => { const id = window.__ptai.curTrackId(); const raw = localStorage.getItem('ptai1:' + id); const p = raw ? JSON.parse(raw) : null; return p ? { finishFrames: p.finishFrames, verified: p.verified, source: p.source } : null; });
+  console.log('第一次之后缓存里的方案:', JSON.stringify(cached)); vpsSeen.length = 0;
+  await new Promise((r2) => setTimeout(r2, 1500)); const o2 = await clickAndWait('(第二次:先按 T 回起点)'); outcome = outcome + ' | 第二次: ' + o2;
+  console.log('第二次的日志:', (await ui(() => window.__ptai.ui.$('log').textContent)).replace(/\n/g, ' | '), '| 第二次期间的榜单请求:', JSON.stringify(vpsSeen));
+}
 await shot('99_final');
 // 按键显示核对:物理侧实际收到的按键位 ctl 应当和方案在该帧(允许 ±1 帧的边沿)按住的键一致
 const kd = await ui(() => { const id = window.__ptai.curTrackId(); const p = window.__ptai.loadPlan(id); return { log: window.__ptai.S.keyLog || [], toggles: p ? p.toggles : null }; });

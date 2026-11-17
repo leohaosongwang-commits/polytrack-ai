@@ -24,7 +24,7 @@ test('按键显示:面板里有键帽和时间轴,数据源是物理侧的 ctl,d
 });
 
 test('探索式规划已打进产物,并作为规划失败后的兜底', () => {
-  assert.ok(js.includes('async function exploreLap(') && js.includes('exploreLap }'));
+  assert.ok(js.includes('async function exploreLap(') && js.includes('exploreLap, polishPlan }'));
   assert.ok(js.includes('window.__ptGuideMath') && js.includes('function projectGuide(') && js.includes('window.__ptGuideUI') && js.includes('prepareGuide'), '引导线(相机钩子 + 叠加层 + 数学)要在产物里');
   assert.ok(js.includes("'projectionMatrix'") && js.includes('__ptaiOverlay'), '相机钩子要跳过叠加层自己的绘制,否则死循环');
   assert.ok(js.includes('function buildTrajectoryProgress(') && js.includes('buildTrajectoryProgress, exploreLap'), 'solver.mjs imports refpath.mjs, so the bundle must include it');
@@ -47,6 +47,25 @@ test('不拦截上传:清单不声明网络层规则,产物里没有网络 API �
   assert.ok(!js.includes('blocked by PolyTrack AI'));
 });
 
+test('规划流程:现成方案 → 榜单第 1 名回放 + 页面内微调 → 从零求解,微调核心已打进产物', () => {
+  assert.ok(js.includes('async function polishPlan(') && js.includes('exploreLap, polishPlan }'), 'tas_core.mjs 要打进求解器包并导出 polishPlan');
+  assert.ok(!js.includes("from './solver.mjs'"), 'tas_core 的 import 要被去掉');
+  for (const k of ['async function obtainPlan(', 'async function deriveFromTop(', 'async function fetchTop1(', 'async function decodeRecordingWeb(', 'async function trackId64(']) assert.ok(js.includes(k), k);
+  assert.ok(js.includes("order: 'backward'"), '页面内微调从终点往起点扫');
+  assert.ok(js.includes('不慢于榜单第 1 名') && js.includes('SOLVER.polishPlan(g, toggles, top.frames'));
+  assert.ok(js.includes('const r = await obtainPlan(ui, id)'), '点击要走 obtainPlan,而不是直接 loadPlan / solve');
+  assert.ok(fs.readFileSync(root + 'scripts/lib/worker_shim.js', 'utf8').includes('trackId = tr.getId()'), 'Worker 的 track 消息要带上游戏自己算的 trackId');
+});
+
+test('网络:扩展自己只发两种只读 GET(榜单 / 回放),没有任何写入类请求', () => {
+  const hosts = new Set(js.match(/https:\/\/vps\.kodub\.com[^'"`\s)]*/g) ?? []);
+  assert.deepEqual([...hosts], ['https://vps.kodub.com/v6/'], '产物里只能出现榜单只读接口的前缀');
+  assert.ok(js.includes("method: 'GET', credentials: 'omit'"), '榜单读取必须是不带 cookie 的 GET');
+  assert.ok(!/method:\s*['"](POST|PUT|PATCH|DELETE)['"]/i.test(js), '不能有写入类请求');
+  assert.ok(!/\.send\((?!\))/.test(js.replace(/XMLHttpRequest[^;]*?x\.send\(\)/g, '')), '除了取 Worker 脚本的那一次 GET,没有 XHR 发送体');
+  for (const p of ['leaderboard?version=0.6.3', 'recordings?version=0.6.3']) assert.ok(js.includes(p), p);
+});
+
 test('构建产物里没有游戏代码特征(Worker 脚本只在运行时取、只在内存补丁)', () => {
   assert.ok(!js.includes('PolyTrackPhysics().then')); // 游戏 Worker 脚本里的片段
   assert.ok(!js.includes('importScripts("lib/polytrack_physics.js")'));
@@ -54,7 +73,8 @@ test('构建产物里没有游戏代码特征(Worker 脚本只在运行时取、
 });
 
 test('占位符都已替换;本机方案通道存在(local.json 被 .gitignore,公开构建里是空表)', () => {
-  assert.ok(!js.includes('__BUNDLED_PLANS__') && !js.includes('__LOCAL_PLANS__'));
+  assert.ok(!js.includes('__BUNDLED_PLANS__') && !js.includes('__LOCAL_PLANS__') && !js.includes('__BUILD_INFO__'));
+  assert.ok(/const BUILD = \{"t":"\d\d-\d\d \d\d:\d\d","local":\d+\}/.test(js)); // 页脚的构建标记
   assert.ok(js.includes('const LOCAL_SEED = '));
   assert.match(fs.readFileSync(root + '.gitignore', 'utf8'), /extension\/plans\/local\.json/);
 });

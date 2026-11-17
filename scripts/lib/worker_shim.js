@@ -54,7 +54,9 @@
         const tiles = []; if (cfg) cfg.tiles.rotated(0, 0).forEach((a, b, c2) => tiles.push([a, b, c2]));
         info[p.partId] = { category: cfg?.category, detector: cfg?.detector ? JSON.parse(JSON.stringify(cfg.detector)) : null, startOffset: cfg?.startOffset ? JSON.parse(JSON.stringify(cfg.startOffset)) : null, tilesUnrotated: tiles };
       }
-      g.postMessage({ __vt: 'track', id: d.id, parts, info, start: st ? { position: { x: st.position.x, y: st.position.y, z: st.position.z }, quaternion: { x: st.quaternion.x, y: st.quaternion.y, z: st.quaternion.z, w: st.quaternion.w } } : null });
+      // trackId:游戏自己的 Track.getId()(赛道内容的 SHA-256,64 位十六进制)= 榜单 / 回放接口里的 trackId;只读榜单时用它定位赛道
+      let trackId = null; try { trackId = tr.getId(); } catch { /* 取不到就当没有 */ }
+      g.postMessage({ __vt: 'track', id: d.id, trackId, parts, info, start: st ? { position: { x: st.position.x, y: st.position.y, z: st.position.z }, quaternion: { x: st.quaternion.x, y: st.quaternion.y, z: st.quaternion.z, w: st.quaternion.w } } : null });
     } else if (d.__vt === 'catalog') {
       // 仅在 exposeTrack 补丁下可用:列出全部部件配置(id、类别、未旋转的占格、检测器、起点偏移),用于设计赛道
       const ho = g.__ho;
