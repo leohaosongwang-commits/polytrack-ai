@@ -559,9 +559,13 @@
       .gd::after{content:'';position:absolute;top:2px;left:17px;width:17px;height:17px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.4);transition:left .22s cubic-bezier(.3,.9,.3,1)}
       .gd.off{background:#353d60;box-shadow:inset 0 0 0 1px rgba(255,255,255,.1)}
       .gd.off::after{left:2px}
-      .log{margin-top:14px;max-height:62px;overflow:auto;padding:7px 9px;border-radius:10px;background:rgba(0,0,0,.3);box-shadow:inset 0 0 0 1px var(--line);font:10.5px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--dim);white-space:pre-wrap;word-break:break-all;cursor:pointer;user-select:text;scrollbar-width:thin}
-      .log.big{max-height:190px}
-      .log:empty{display:none}
+      .dt{display:none;align-items:center;gap:5px;margin-top:12px;padding:2px 3px;font-size:10.5px;color:var(--mute);transition:color .15s}
+      .dt.has{display:inline-flex}
+      .dt:hover{color:var(--dim)}
+      .dt svg{width:10px;height:10px;transition:transform .25s cubic-bezier(.3,.9,.3,1)}
+      .dt.open svg{transform:rotate(180deg)}
+      .log{display:none;margin-top:7px;max-height:150px;overflow:auto;padding:7px 9px;border-radius:10px;background:rgba(0,0,0,.3);box-shadow:inset 0 0 0 1px var(--line);font:10.5px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--dim);white-space:pre-wrap;word-break:break-all;user-select:text;scrollbar-width:thin}
+      .log.show{display:block}
       .hk{margin-top:13px;font-size:10px;color:var(--mute);padding:0 2px}
       .ft{margin-top:5px;font-size:9.5px;color:#535c80;white-space:pre-line;line-height:1.5;padding:0 2px}
       @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
@@ -599,7 +603,8 @@
           <div class="row"><span>引导线</span><button class="gd" id="gd" tabindex="-1"></button></div>
           <div class="row"><span>本赛道方案</span><span class="acts"><button class="lnk" id="clr" tabindex="-1">清除缓存</button><button class="lnk" id="cp" tabindex="-1">复制回放串</button></span></div>
         </div></div>
-        <div class="log" id="log" title="点击展开 / 收起"></div>
+        <button class="dt" id="dt" tabindex="-1" title="展开 / 收起运行详情(取方案 / Verify / 微调的过程)">运行详情<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></button>
+        <div class="log" id="log"></div>
         <div class="hk" id="hk"></div>
         <div class="ft" id="ft">只读榜单、从不上传成绩;成绩是否上传由游戏结算界面决定。</div>
       </div>
@@ -613,7 +618,9 @@
     const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch { /* ignore */ } };
     if (lsGet('ptai:collapsed') === '1') box.classList.add('col');
     $('min').addEventListener('click', () => lsSet('ptai:collapsed', box.classList.toggle('col') ? '1' : '0'));
-    $('log').addEventListener('click', () => $('log').classList.toggle('big'));
+    const dtPaint = (open) => { $('log').classList.toggle('show', open); $('dt').classList.toggle('open', open); $('log').scrollTop = 1e9; }; // 运行详情:默认折叠,展开状态记住
+    dtPaint(lsGet('ptai:logopen') === '1');
+    $('dt').addEventListener('click', () => { const open = !$('log').classList.contains('show'); lsSet('ptai:logopen', open ? '1' : '0'); dtPaint(open); });
     const place = (x, y) => { const w = box.offsetWidth || 296; box.style.left = Math.max(4, Math.min(window.innerWidth - w - 4, x)) + 'px'; box.style.top = Math.max(4, Math.min(window.innerHeight - 44, y)) + 'px'; box.style.right = 'auto'; };
     try { const p = JSON.parse(lsGet('ptai:pos') || 'null'); if (p && Number.isFinite(p.x) && Number.isFinite(p.y)) place(p.x, p.y); } catch { /* ignore */ }
     let drag = null;
@@ -654,7 +661,7 @@
     };
     const ui = {
       status: (t) => { $('st').textContent = t; tone = /^完成/.test(t) ? 'ok' : /失败|出错/.test(t) ? 'err' : /^已(停止|取消)/.test(t) ? 'warn' : ''; dotPaint(); },
-      log: (t) => { lines.push(t); if (lines.length > 40) lines.shift(); $('log').textContent = lines.slice(-6).join('\n'); $('log').scrollTop = 1e9; },
+      log: (t) => { lines.push(t); if (lines.length > 40) lines.shift(); $('log').textContent = lines.join('\n'); $('log').scrollTop = 1e9; $('dt').classList.add('has'); },
       drive: (f, total) => { setBar((100 * f) / total, { label: '自动驾驶', time: `${(f / 1000).toFixed(2)} s / ${(total / 1000).toFixed(2)} s` }); $('st').textContent = `自动驾驶中 ${(f / 1000).toFixed(2)} s / ${(total / 1000).toFixed(2)} s`; },
       /** 目标:{ mode: 'fast' | 'rank' | 'sec', value: 整数(fast 时为 null;没填 / 不是数字为 NaN) } */
       getTarget: () => ({ mode: TG.mode, value: TG.mode === 'fast' ? null : parseInt(TG[TG.mode], 10) }),
