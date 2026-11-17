@@ -42,6 +42,12 @@ test('目标名次 / 秒数:榜单二分(只读)和选方案规则打进产物;�
   assert.ok(js.includes('e.stopPropagation()'), '输入框里打字的按键不能冒泡到游戏');
 });
 
+test('面板外观:滑块分段控件、主按钮热键提示、分组设置、目标组在忙时收起;原来的元素 id 都还在', () => {
+  for (const k of ['class="thumb"', 'id="kk"', 'ICON_PLAY', 'ICON_STOP', '.tg.dis{grid-template-rows:0fr', ".style.setProperty('--i'", 'class="grp"', 'class="stw"']) assert.ok(js.includes(k), k);
+  for (const id of ['go', 'gi', 'gt', 'st', 'dot', 'log', 'ft', 'hk', 'ver', 'hp', 'mbar', 'bd', 'tl', 'gd', 'clr', 'cp', 'kt', 'k_up', 'k_left', 'k_down', 'k_right', 'k_reset']) assert.ok(js.includes(`id="${id}"`), id); // 测试脚本和逻辑依赖的 id
+  assert.ok(js.includes("$('ver').textContent = `v${BUILD.v}`"), '标题栏版本徽标跟着 BUILD.v');
+});
+
 test('探索式规划已打进产物,并作为规划失败后的兜底', () => {
   assert.ok(js.includes('async function exploreLap(') && js.includes('exploreLap, polishPlan }'));
   assert.ok(js.includes('window.__ptGuideMath') && js.includes('function projectGuide(') && js.includes('window.__ptGuideUI') && js.includes('prepareGuide'), '引导线(相机钩子 + 叠加层 + 数学)要在产物里');

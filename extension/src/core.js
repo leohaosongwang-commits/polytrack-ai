@@ -445,128 +445,160 @@
     const host = document.createElement('div'); host.id = 'ptai-panel';
     host.style.cssText = 'position:fixed;top:64px;right:12px;z-index:2147483647;all:initial;';
     const root = host.attachShadow({ mode: 'open' });
+    const ICON_PLAY = '<svg viewBox="0 0 12 12"><path d="M3 1.6v8.8c0 .4.4.6.8.4l7-4.4c.3-.2.3-.6 0-.8l-7-4.4c-.4-.2-.8 0-.8.4z"/></svg>', ICON_STOP = '<svg viewBox="0 0 12 12"><rect x="2.2" y="2.2" width="7.6" height="7.6" rx="1.6"/></svg>';
     root.innerHTML = `<style>
       :host{all:initial}
       *{box-sizing:border-box}
-      .box{position:fixed;top:64px;right:12px;width:292px;color:#e9edff;font:12px/1.5 -apple-system,BlinkMacSystemFont,'SF Pro Text','PingFang SC','Segoe UI',sans-serif;background:linear-gradient(180deg,rgba(26,31,56,.9),rgba(13,17,33,.92));-webkit-backdrop-filter:blur(14px) saturate(1.3);backdrop-filter:blur(14px) saturate(1.3);border:1px solid rgba(255,255,255,.09);border-radius:16px;box-shadow:0 14px 44px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.06);user-select:none;pointer-events:auto;overflow:hidden}
+      .box{--ink:#e9ecf8;--dim:#a0a9cc;--mute:#6c7699;--line:rgba(255,255,255,.075);--acc:#8b9dff;--ok:#5eead4;--warn:#fbbf24;--bad:#fb7185;
+        position:fixed;top:64px;right:12px;width:296px;color:var(--ink);font:12px/1.5 -apple-system,BlinkMacSystemFont,'SF Pro Text','PingFang SC','Segoe UI',sans-serif;-webkit-font-smoothing:antialiased;
+        background:radial-gradient(130% 62% at 0% 0%,rgba(112,128,255,.18),transparent 60%),linear-gradient(180deg,rgba(22,25,41,.87),rgba(11,13,23,.91));
+        -webkit-backdrop-filter:blur(24px) saturate(1.6);backdrop-filter:blur(24px) saturate(1.6);border:1px solid rgba(255,255,255,.1);border-radius:18px;
+        box-shadow:0 32px 72px -20px rgba(0,0,0,.7),0 0 0 .5px rgba(0,0,0,.55),inset 0 1px 0 rgba(255,255,255,.08);user-select:none;pointer-events:auto;overflow:hidden;animation:in .4s cubic-bezier(.2,.8,.2,1)}
+      @keyframes in{from{opacity:0;transform:translateY(-6px) scale(.985)}}
       button{all:unset;box-sizing:border-box;cursor:pointer;text-align:center}
-      .hd{display:flex;align-items:center;gap:9px;padding:11px 10px 10px 13px;cursor:grab;touch-action:none}
+      .hd{display:flex;align-items:center;gap:10px;padding:13px 11px 12px 15px;cursor:grab;touch-action:none}
       .hd:active{cursor:grabbing}
-      .logo{flex:none;width:26px;height:26px;border-radius:8px;display:grid;place-items:center;background:linear-gradient(135deg,#6366f1,#22d3ee);box-shadow:0 2px 10px rgba(34,211,238,.35)}
+      .logo{flex:none;width:28px;height:28px;border-radius:9px;display:grid;place-items:center;background:linear-gradient(145deg,#90a2ff,#46c8f0);box-shadow:inset 0 0 0 1px rgba(255,255,255,.2),0 6px 18px -4px rgba(112,132,255,.65)}
       .logo svg{width:15px;height:15px}
-      .nm{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.2}
-      .nm b{font-size:13.5px;font-weight:700;letter-spacing:.2px}
-      .nm small{font-size:10px;opacity:.55;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-      .hp{display:none;font-size:12px;font-weight:700;color:#7ee8c4;font-variant-numeric:tabular-nums}
+      .nm{flex:1;min-width:0;display:flex;align-items:center;gap:8px}
+      .nm b{font-size:13.5px;font-weight:650;letter-spacing:.1px;white-space:nowrap}
+      .nm small{font:600 10px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--dim);padding:0 7px;border-radius:99px;background:rgba(255,255,255,.06);border:1px solid var(--line);white-space:nowrap}
+      .hp{display:none;font-size:12px;font-weight:650;color:var(--ok);font-variant-numeric:tabular-nums}
       .col .hp:not(:empty){display:block}
-      .ic{width:24px;height:24px;border-radius:7px;display:grid;place-items:center;color:#9aa6d6;transition:background .15s,color .15s}
-      .ic:hover{background:rgba(255,255,255,.1);color:#fff}
-      .ic svg{width:14px;height:14px;transition:transform .2s}
+      .ic{width:26px;height:26px;border-radius:8px;display:grid;place-items:center;color:var(--mute);transition:background .15s,color .15s}
+      .ic:hover{background:rgba(255,255,255,.09);color:#fff}
+      .ic svg{width:14px;height:14px;transition:transform .25s cubic-bezier(.3,.9,.3,1)}
       .col .ic svg{transform:rotate(180deg)}
-      .mini{height:2px;background:rgba(255,255,255,.06)}
-      .mini i{display:block;height:100%;width:0;background:linear-gradient(90deg,#34d399,#22d3ee);transition:width .25s}
-      .bd{padding:11px 13px 12px}
+      .mini{height:2px;background:rgba(255,255,255,.05)}
+      .mini i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--acc),var(--ok));box-shadow:0 0 10px rgba(94,234,212,.55);transition:width .25s}
+      .bd{padding:2px 16px 14px}
       .col .bd{display:none}
-      .go{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:10px 0;border-radius:11px;font-weight:700;font-size:14px;color:#fff;background:linear-gradient(135deg,#3b82f6,#06b6d4);box-shadow:0 4px 16px rgba(59,130,246,.38);transition:transform .08s,filter .15s,box-shadow .15s}
-      .go:hover{filter:brightness(1.1);box-shadow:0 6px 20px rgba(59,130,246,.5)}
-      .go:active{transform:scale(.985)}
-      .go.busy{background:linear-gradient(135deg,#d97706,#f59e0b);box-shadow:0 4px 16px rgba(245,158,11,.32)}
-      .go.stop{background:linear-gradient(135deg,#dc2626,#f43f5e);box-shadow:0 4px 16px rgba(244,63,94,.35)}
-      .gi{font-size:12px}
-      .card{display:flex;gap:9px;align-items:flex-start;margin-top:10px;padding:8px 10px;border-radius:10px;background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.06)}
-      .dot{flex:none;width:8px;height:8px;border-radius:50%;margin-top:5px;background:#64708f}
-      .dot[data-s=work]{background:#fbbf24;animation:pulse 1.2s ease-in-out infinite}
-      .dot[data-s=drive]{background:#34d399;animation:pulse 1.2s ease-in-out infinite}
-      .dot[data-s=ok]{background:#34d399;box-shadow:0 0 8px #34d399}
-      .dot[data-s=err]{background:#f43f5e}
-      .dot[data-s=warn]{background:#fbbf24}
-      @keyframes pulse{50%{opacity:.35;transform:scale(.8)}}
-      .st{flex:1;min-width:0;min-height:18px;color:#f5e6b3;word-break:break-word;white-space:pre-line;user-select:text}
-      .pg{margin-top:10px}
-      .pg.idle .pr,.pg.idle .chips,.pg.idle .pt{display:none}
-      .pg.idle .trk{height:4px;margin-top:0}
-      .pr{display:flex;align-items:baseline;justify-content:space-between;gap:8px;min-height:22px}
-      .pl{font-size:11px;color:#aeb8e6;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
-      .pc{flex:none;font-size:20px;font-weight:700;font-variant-numeric:tabular-nums;color:#fff;letter-spacing:-.3px}
-      .trk{height:8px;border-radius:99px;background:rgba(255,255,255,.08);overflow:hidden;margin-top:3px;position:relative}
-      .trk i{display:block;height:100%;width:0;border-radius:99px;background:linear-gradient(90deg,#34d399,#22d3ee);transition:width .25s ease;position:relative;overflow:hidden}
-      .trk.act i::after{content:'';position:absolute;inset:0;background:linear-gradient(100deg,transparent 30%,rgba(255,255,255,.45) 50%,transparent 70%);background-size:200% 100%;animation:sheen 1.4s linear infinite}
+      .go{position:relative;display:flex;align-items:center;justify-content:center;gap:9px;width:100%;margin-top:12px;padding:11px 0;border-radius:12px;font-weight:650;font-size:14px;letter-spacing:.3px;color:#0d1226;
+        background:linear-gradient(180deg,#fff,#dde2fb);box-shadow:inset 0 1px 0 #fff,0 0 0 1px rgba(255,255,255,.3),0 10px 26px -8px rgba(139,157,255,.6);transition:transform .14s,box-shadow .2s,filter .2s}
+      .go:hover{transform:translateY(-1px);filter:brightness(1.03);box-shadow:inset 0 1px 0 #fff,0 0 0 1px rgba(255,255,255,.35),0 14px 30px -8px rgba(139,157,255,.78)}
+      .go:active{transform:translateY(0) scale(.99)}
+      .gi{display:grid;place-items:center}
+      .gi svg{width:12px;height:12px;fill:currentColor}
+      .go kbd{position:absolute;right:11px;top:50%;transform:translateY(-50%);font:600 10px/1 ui-monospace,SFMono-Regular,Menlo,monospace;color:rgba(13,18,38,.5);padding:3px 6px;border-radius:5px;background:rgba(13,18,38,.07);border:1px solid rgba(13,18,38,.12)}
+      .go.busy{color:#fde9a8;background:linear-gradient(180deg,rgba(251,191,36,.22),rgba(251,191,36,.1));box-shadow:inset 0 0 0 1px rgba(251,191,36,.5),0 10px 26px -10px rgba(251,191,36,.55)}
+      .go.stop{color:#ffd0d6;background:linear-gradient(180deg,rgba(251,113,133,.24),rgba(251,113,133,.1));box-shadow:inset 0 0 0 1px rgba(251,113,133,.5),0 10px 26px -10px rgba(251,113,133,.55)}
+      .go.busy kbd,.go.stop kbd{color:inherit;opacity:.7;background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.16)}
+      .stw{display:flex;gap:10px;align-items:flex-start;margin-top:13px;padding:0 2px}
+      .dot{flex:none;width:7px;height:7px;border-radius:50%;margin-top:6px;background:#566087;box-shadow:0 0 0 3px rgba(255,255,255,.045);transition:background .2s}
+      .dot[data-s=work]{background:var(--warn);box-shadow:0 0 0 3px rgba(251,191,36,.16);animation:pulse 1.3s ease-in-out infinite}
+      .dot[data-s=drive]{background:var(--ok);box-shadow:0 0 0 3px rgba(94,234,212,.16);animation:pulse 1.3s ease-in-out infinite}
+      .dot[data-s=ok]{background:var(--ok);box-shadow:0 0 0 3px rgba(94,234,212,.18),0 0 10px var(--ok)}
+      .dot[data-s=err]{background:var(--bad);box-shadow:0 0 0 3px rgba(251,113,133,.18)}
+      .dot[data-s=warn]{background:var(--warn);box-shadow:0 0 0 3px rgba(251,191,36,.16)}
+      @keyframes pulse{50%{opacity:.4;transform:scale(.8)}}
+      .st{flex:1;min-width:0;min-height:18px;color:var(--ink);word-break:break-word;white-space:pre-line;user-select:text}
+      .st[data-s=ok]{color:#aaf3e6}
+      .st[data-s=err]{color:#ffb4bf}
+      .st[data-s=warn]{color:#fde9a8}
+      .pg{display:grid;grid-template-rows:1fr;transition:grid-template-rows .3s cubic-bezier(.2,.8,.2,1),opacity .25s}
+      .pg.idle{grid-template-rows:0fr;opacity:0}
+      .pgi{overflow:hidden;min-height:0}
+      .pgx{padding:14px 2px 0}
+      .pr{display:flex;align-items:flex-end;justify-content:space-between;gap:8px;min-height:26px}
+      .pl{font-size:11px;color:var(--dim);overflow:hidden;white-space:nowrap;text-overflow:ellipsis;padding-bottom:2px}
+      .pc{flex:none;font-size:26px;line-height:1;font-weight:600;letter-spacing:-.03em;color:#fff;font-variant-numeric:tabular-nums}
+      .trk{height:5px;border-radius:99px;background:rgba(255,255,255,.07);margin-top:10px;position:relative}
+      .trk i{display:block;height:100%;width:0;border-radius:99px;background:linear-gradient(90deg,#7c8cff,var(--ok));box-shadow:0 0 14px rgba(94,234,212,.5);transition:width .25s ease;position:relative;overflow:hidden}
+      .trk.act i::after{content:'';position:absolute;inset:0;background:linear-gradient(100deg,transparent 30%,rgba(255,255,255,.5) 50%,transparent 70%);background-size:200% 100%;animation:sheen 1.5s linear infinite}
       @keyframes sheen{from{background-position:200% 0}to{background-position:-200% 0}}
       .trk.ind i{width:38%!important;animation:ind 1.1s ease-in-out infinite alternate}
       @keyframes ind{from{margin-left:0}to{margin-left:62%}}
-      .chips{display:flex;gap:5px;margin-top:8px;flex-wrap:wrap}
-      .chip{font-size:10px;padding:2px 8px;border-radius:99px;color:#7f8ab8;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.06)}
-      .chip.on{color:#06281c;background:#7ee8c4;border-color:#7ee8c4;font-weight:700}
-      .chip.ok{color:#7ee8c4;border-color:rgba(126,232,196,.35)}
-      .pt{margin-top:6px;font-size:10.5px;color:#8f9bc9;font-variant-numeric:tabular-nums}
+      .chips{display:flex;margin-top:12px}
+      .chip{position:relative;flex:1;text-align:center;font-size:10px;color:var(--mute);padding-top:13px;white-space:nowrap}
+      .chip::before{content:'';position:absolute;top:0;left:50%;width:7px;height:7px;margin-left:-3.5px;border-radius:50%;background:#262d4d;box-shadow:inset 0 0 0 1px rgba(255,255,255,.14);z-index:1;transition:background .2s}
+      .chip+.chip::after{content:'';position:absolute;top:3px;left:calc(-50% + 7px);right:calc(50% + 7px);height:1px;background:rgba(255,255,255,.12)}
+      .chip.ok{color:var(--dim)}
+      .chip.ok::before{background:var(--ok);box-shadow:none}
+      .chip.ok+.chip::after{background:var(--ok);opacity:.7}
+      .chip.on{color:#fff;font-weight:600}
+      .chip.on::before{background:#fff;box-shadow:0 0 0 3px rgba(139,157,255,.4)}
+      .pt{margin-top:9px;font-size:10.5px;color:var(--mute);font-variant-numeric:tabular-nums;text-align:center}
       .pt:empty,.chips:empty{display:none}
-      .tools{display:flex;gap:6px;margin-top:10px}
-      .gd{flex:1;display:flex;align-items:center;justify-content:space-between;padding:6px 10px;border-radius:9px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.07);color:#cdd5f7;font-size:11.5px;transition:background .15s}
-      .gd:hover{background:rgba(255,255,255,.1)}
-      .knob{width:26px;height:15px;border-radius:99px;background:#34d399;position:relative;transition:background .15s}
-      .knob::after{content:'';position:absolute;top:2px;left:13px;width:11px;height:11px;border-radius:50%;background:#fff;transition:left .15s}
-      .gd.off .knob{background:#4b5578}
-      .gd.off .knob::after{left:2px}
-      .ghost{flex:1;padding:6px 0;border-radius:9px;font-size:11px;color:#a8b3e3;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.06);transition:background .15s,color .15s}
-      .ghost:hover{background:rgba(255,255,255,.1);color:#fff}
-      .log{margin-top:10px;max-height:62px;overflow:auto;padding:6px 8px;border-radius:9px;background:rgba(0,0,0,.28);font:10.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;color:#9aa6d6;white-space:pre-wrap;word-break:break-all;cursor:pointer;user-select:text;scrollbar-width:thin}
-      .log.big{max-height:190px}
-      .log:empty{display:none}
-      .hk{margin-top:9px;font-size:10px;color:#7f8ab8}
-      .ft{margin-top:5px;font-size:9.5px;color:#606b94;white-space:pre-line;line-height:1.45}
-      .keys{display:none;margin-top:10px;padding:9px 10px;border-radius:10px;background:rgba(0,0,0,.22);border:1px solid rgba(255,255,255,.05)}
+      .keys{display:none;margin-top:14px;padding:11px 12px 10px;border-radius:13px;background:rgba(0,0,0,.24);border:1px solid var(--line)}
       .keys.on{display:block}
-      .kr{display:flex;align-items:center;gap:12px}
+      .kr{display:flex;align-items:center;gap:14px}
       .kb{display:grid;grid-template-columns:repeat(3,27px);grid-template-rows:repeat(2,25px);gap:4px;flex:none}
-      .k{display:flex;align-items:center;justify-content:center;border-radius:6px;background:rgba(255,255,255,.06);color:#7f8ab8;border:1px solid rgba(255,255,255,.1);border-bottom-width:2px;font-weight:700;font-size:12px;transition:background .05s,transform .05s}
-      .k.on{background:#34d399;color:#06281c;border-color:#7ee8c4;box-shadow:0 0 10px rgba(52,211,153,.7);transform:translateY(1px)}
+      .k{display:flex;align-items:center;justify-content:center;border-radius:7px;background:linear-gradient(180deg,rgba(255,255,255,.1),rgba(255,255,255,.04));color:var(--mute);box-shadow:inset 0 0 0 1px rgba(255,255,255,.09),0 2px 0 rgba(0,0,0,.4);font-weight:700;font-size:12px;transition:background .06s,transform .06s,box-shadow .06s}
+      .k.on{background:linear-gradient(180deg,#86f5e3,#34d4be);color:#032720;box-shadow:inset 0 0 0 1px #b4f7ec,0 0 14px rgba(94,234,212,.6);transform:translateY(2px)}
       .k.r{grid-column:3;grid-row:1;font-size:10px}
       .k.r.off{visibility:hidden}
-      .kt{font-size:13px;font-weight:600;color:#bff3df;min-height:18px}
-      #tl{display:block;width:100%;height:50px;margin-top:8px;border-radius:6px;background:rgba(0,0,0,.28)}
-      .tg{margin-top:10px;padding:7px 10px 8px;border-radius:10px;background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.06);transition:opacity .15s}
-      .tg.dis{opacity:.5;pointer-events:none}
-      .tgh{display:flex;align-items:center;gap:9px}
-      .tgl{flex:none;font-size:11px;color:#aeb8e6}
-      .seg{flex:1;display:flex;padding:2px;border-radius:8px;background:rgba(0,0,0,.3)}
-      .seg button{flex:1;padding:3px 0;border-radius:6px;font-size:11px;color:#8f9bc9;transition:background .15s,color .15s}
+      .kt{font-size:13px;font-weight:600;color:#c4f6ec;min-height:18px}
+      #tl{display:block;width:100%;height:50px;margin-top:9px;border-radius:7px;background:rgba(0,0,0,.26)}
+      .sec{margin-top:16px}
+      .tg{margin-top:0;display:grid;grid-template-rows:1fr;transition:grid-template-rows .3s cubic-bezier(.2,.8,.2,1),opacity .25s}
+      .tgi{overflow:hidden;min-height:0}
+      .tgx{padding:16px 0 0}
+      .cap{margin:0 3px 7px;font-size:10px;font-weight:650;letter-spacing:.09em;color:var(--mute)}
+      .grp{border-radius:13px;background:rgba(255,255,255,.035);border:1px solid var(--line);overflow:hidden}
+      .seg{position:relative;display:grid;grid-template-columns:repeat(3,1fr);margin:7px;padding:2px;border-radius:9px;background:rgba(0,0,0,.32);box-shadow:inset 0 0 0 1px var(--line)}
+      .seg .thumb{position:absolute;top:2px;bottom:2px;left:2px;width:calc((100% - 4px)/3);border-radius:7px;background:linear-gradient(180deg,rgba(139,157,255,.42),rgba(139,157,255,.22));box-shadow:inset 0 0 0 1px rgba(160,175,255,.42),inset 0 1px 0 rgba(255,255,255,.18),0 3px 12px rgba(80,100,255,.25);transform:translateX(calc(var(--i,0)*100%));transition:transform .3s cubic-bezier(.3,.9,.3,1)}
+      .seg button{position:relative;z-index:1;padding:5px 0;font-size:11.5px;color:var(--dim);transition:color .2s}
       .seg button:hover{color:#fff}
-      .seg button.on{background:linear-gradient(135deg,#3b82f6,#06b6d4);color:#fff;font-weight:700}
-      .tin{display:none;align-items:center;gap:7px;margin-top:8px;font-size:12px;color:#cdd5f7}
-      .tg.m-rank .tin,.tg.m-sec .tin{display:flex}
-      .tin input{all:unset;box-sizing:border-box;width:86px;padding:4px 8px;border-radius:7px;background:rgba(0,0,0,.36);border:1px solid rgba(255,255,255,.14);color:#fff;font:700 13px/1.25 ui-monospace,SFMono-Regular,Menlo,monospace;text-align:right;user-select:text;transition:border-color .15s,box-shadow .15s}
-      .tin input:focus{border-color:#22d3ee;box-shadow:0 0 0 2px rgba(34,211,238,.22)}
-      .tin input::placeholder{color:#59638a}
-      .tn{margin-top:6px;font-size:10.5px;line-height:1.5;color:#8f9bc9;white-space:pre-line;word-break:break-word;user-select:text}
-      .tn:empty,.tg.m-fast .tn{display:none}
+      .seg button.on{color:#fff;font-weight:650}
+      .tbody{display:none;border-top:1px solid var(--line);padding:10px 12px 11px}
+      .tg.m-rank .tbody,.tg.m-sec .tbody{display:block}
+      .tin{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--dim)}
+      .tin input{all:unset;box-sizing:border-box;flex:none;width:92px;padding:5px 9px;border-radius:8px;background:rgba(0,0,0,.34);box-shadow:inset 0 0 0 1px rgba(255,255,255,.12);color:#fff;font:700 13px/1.25 ui-monospace,SFMono-Regular,Menlo,monospace;text-align:right;user-select:text;transition:box-shadow .15s}
+      .tin input:focus{box-shadow:inset 0 0 0 1px var(--acc),0 0 0 3px rgba(139,157,255,.22)}
+      .tin input::placeholder{color:#4b5478}
+      .tn{margin-top:8px;font-size:10.5px;line-height:1.55;color:var(--dim);white-space:pre-line;word-break:break-word;user-select:text}
+      .tn:empty{display:none}
+      .tg.dis{grid-template-rows:0fr;opacity:0;pointer-events:none}
+      .row{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:40px;padding:0 12px;border-top:1px solid var(--line);color:var(--ink);font-size:12px}
+      .row:first-child{border-top:0}
+      .acts{display:flex;gap:2px;margin-right:-6px}
+      .lnk{padding:4px 7px;border-radius:7px;font-size:11px;color:var(--acc);transition:background .15s,color .15s}
+      .lnk:hover{background:rgba(139,157,255,.14);color:#c4ceff}
+      #clr:hover{background:rgba(251,113,133,.14);color:#ffb4bf}
+      .gd{position:relative;flex:none;width:36px;height:21px;border-radius:99px;background:linear-gradient(180deg,#3fd9c3,var(--ok));box-shadow:inset 0 0 0 1px rgba(255,255,255,.25),0 0 12px rgba(94,234,212,.28);transition:background .2s,box-shadow .2s}
+      .gd::after{content:'';position:absolute;top:2px;left:17px;width:17px;height:17px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.4);transition:left .22s cubic-bezier(.3,.9,.3,1)}
+      .gd.off{background:#353d60;box-shadow:inset 0 0 0 1px rgba(255,255,255,.1)}
+      .gd.off::after{left:2px}
+      .log{margin-top:14px;max-height:62px;overflow:auto;padding:7px 9px;border-radius:10px;background:rgba(0,0,0,.3);box-shadow:inset 0 0 0 1px var(--line);font:10.5px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--dim);white-space:pre-wrap;word-break:break-all;cursor:pointer;user-select:text;scrollbar-width:thin}
+      .log.big{max-height:190px}
+      .log:empty{display:none}
+      .hk{margin-top:13px;font-size:10px;color:var(--mute);padding:0 2px}
+      .ft{margin-top:5px;font-size:9.5px;color:#535c80;white-space:pre-line;line-height:1.5;padding:0 2px}
       @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
     </style>
     <div class="box" id="box">
       <div class="hd" id="hd">
         <span class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19c4 0 4-7 8-7s4-7 8-7"/><circle cx="4" cy="19" r="1.3" fill="#fff"/><circle cx="20" cy="5" r="1.3" fill="#fff"/></svg></span>
-        <span class="nm"><b>PolyTrack AI</b><small id="ver">0.6.3 · 本地研究用</small></span>
+        <span class="nm"><b>PolyTrack AI</b><small id="ver" title="适配 PolyTrack 0.6.3 · 本地研究用">0.6.3</small></span>
         <span class="hp" id="hp"></span>
         <button class="ic" id="min" tabindex="-1" title="折叠 / 展开"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6"/></svg></button>
       </div>
       <div class="mini"><i id="mbar"></i></div>
       <div class="bd" id="bd">
-        <button class="go" id="go" tabindex="-1"><span class="gi" id="gi">▶</span><span id="gt">一键自动驾驶</span></button>
-        <div class="tg m-fast" id="tg">
-          <div class="tgh"><span class="tgl">目标</span><div class="seg" id="seg"><button data-m="fast" tabindex="-1" title="尽量快(默认)">最快</button><button data-m="rank" tabindex="-1" title="填一个整数名次:跑完大约排这个名次">名次</button><button data-m="sec" tabindex="-1" title="填一个整数秒数:跑完大约是这个时间">秒数</button></div></div>
-          <div class="tin"><span id="tp">跑完约第</span><input id="tv" type="text" inputmode="numeric" maxlength="7" autocomplete="off" spellcheck="false" placeholder="50"><span id="ts">名</span></div>
-          <div class="tn" id="tn"></div>
-        </div>
-        <div class="card"><i class="dot" id="dot" data-s="idle"></i><div class="st" id="st">待命</div></div>
-        <div class="pg idle" id="pg">
+        <button class="go" id="go" tabindex="-1"><span class="gi" id="gi"></span><span id="gt">一键自动驾驶</span><kbd id="kk">\`</kbd></button>
+        <div class="stw"><i class="dot" id="dot" data-s="idle"></i><div class="st" id="st">待命</div></div>
+        <div class="pg idle" id="pg"><div class="pgi"><div class="pgx">
           <div class="pr"><span class="pl" id="pl"></span><span class="pc" id="pc"></span></div>
           <div class="trk" id="trk"><i id="bar"></i></div>
           <div class="chips" id="chips"></div>
           <div class="pt" id="pt"></div>
-        </div>
+        </div></div></div>
         <div class="keys" id="keys"><div class="kr"><div class="kb"><b class="k r off" id="k_reset">R</b><b class="k" id="k_up" style="grid-column:2;grid-row:1">W</b><b class="k" id="k_left" style="grid-column:1;grid-row:2">A</b><b class="k" id="k_down" style="grid-column:2;grid-row:2">S</b><b class="k" id="k_right" style="grid-column:3;grid-row:2">D</b></div><div class="kt" id="kt">&nbsp;</div></div>
           <canvas id="tl" width="264" height="50"></canvas></div>
-        <div class="tools"><button class="gd" id="gd" tabindex="-1"><span>引导线</span><i class="knob"></i></button></div>
-        <div class="tools"><button class="ghost" id="clr" tabindex="-1">清除本赛道缓存</button><button class="ghost" id="cp" tabindex="-1">复制回放串</button></div>
+        <div class="sec tg m-fast" id="tg"><div class="tgi"><div class="tgx">
+          <div class="cap">目标</div>
+          <div class="grp">
+            <div class="seg" id="seg"><i class="thumb"></i><button data-m="fast" tabindex="-1" title="尽量快(默认)">最快</button><button data-m="rank" tabindex="-1" title="填一个整数名次:跑完大约排这个名次">名次</button><button data-m="sec" tabindex="-1" title="填一个整数秒数:跑完大约是这个时间">秒数</button></div>
+            <div class="tbody">
+              <div class="tin"><span id="tp">跑完约第</span><input id="tv" type="text" inputmode="numeric" maxlength="7" autocomplete="off" spellcheck="false" placeholder="50"><span id="ts">名</span></div>
+              <div class="tn" id="tn"></div>
+            </div>
+          </div>
+        </div></div></div>
+        <div class="sec"><div class="grp">
+          <div class="row"><span>引导线</span><button class="gd" id="gd" tabindex="-1"></button></div>
+          <div class="row"><span>本赛道方案</span><span class="acts"><button class="lnk" id="clr" tabindex="-1">清除缓存</button><button class="lnk" id="cp" tabindex="-1">复制回放串</button></span></div>
+        </div></div>
         <div class="log" id="log" title="点击展开 / 收起"></div>
         <div class="hk" id="hk"></div>
         <div class="ft" id="ft">只读榜单、从不上传成绩;成绩是否上传由游戏结算界面决定。</div>
@@ -582,7 +614,7 @@
     if (lsGet('ptai:collapsed') === '1') box.classList.add('col');
     $('min').addEventListener('click', () => lsSet('ptai:collapsed', box.classList.toggle('col') ? '1' : '0'));
     $('log').addEventListener('click', () => $('log').classList.toggle('big'));
-    const place = (x, y) => { const w = box.offsetWidth || 292; box.style.left = Math.max(4, Math.min(window.innerWidth - w - 4, x)) + 'px'; box.style.top = Math.max(4, Math.min(window.innerHeight - 44, y)) + 'px'; box.style.right = 'auto'; };
+    const place = (x, y) => { const w = box.offsetWidth || 296; box.style.left = Math.max(4, Math.min(window.innerWidth - w - 4, x)) + 'px'; box.style.top = Math.max(4, Math.min(window.innerHeight - 44, y)) + 'px'; box.style.right = 'auto'; };
     try { const p = JSON.parse(lsGet('ptai:pos') || 'null'); if (p && Number.isFinite(p.x) && Number.isFinite(p.y)) place(p.x, p.y); } catch { /* ignore */ }
     let drag = null;
     $('hd').addEventListener('pointerdown', (e) => { if (e.button !== 0 || e.target.closest('button')) return; const r = box.getBoundingClientRect(); drag = { dx: e.clientX - r.left, dy: e.clientY - r.top }; $('hd').setPointerCapture(e.pointerId); e.preventDefault(); });
@@ -597,8 +629,9 @@
     try { const t = JSON.parse(lsGet('ptai:target') || 'null'); if (t && ['fast', 'rank', 'sec'].includes(t.mode)) { TG.mode = t.mode; TG.rank = digits(t.rank); TG.sec = digits(t.sec); } } catch { /* ignore */ }
     const tgSave = () => lsSet('ptai:target', JSON.stringify(TG));
     const tgPaint = () => {
-      $('tg').className = 'tg m-' + TG.mode + (mode !== 'idle' ? ' dis' : '');
+      $('tg').className = 'sec tg m-' + TG.mode + (mode !== 'idle' ? ' dis' : '');
       for (const b of $('seg').querySelectorAll('button')) b.classList.toggle('on', b.dataset.m === TG.mode);
+      $('seg').style.setProperty('--i', ['fast', 'rank', 'sec'].indexOf(TG.mode)); // 滑块位置
       $('tp').textContent = TG.mode === 'rank' ? '跑完约第' : '跑完约'; $('ts').textContent = TG.mode === 'rank' ? '名' : '秒'; $('tv').placeholder = TG.mode === 'rank' ? '50' : '23';
       if (TG.mode !== 'fast' && $('tv').value !== TG[TG.mode]) $('tv').value = TG[TG.mode];
     };
@@ -607,7 +640,7 @@
     // 在输入框里打字时不让按键冒泡到游戏(游戏在 window 上监听 WASD / R / T 等);Enter / Esc 退出输入、把键盘还给游戏
     for (const t of ['keydown', 'keyup', 'keypress']) $('tv').addEventListener(t, (e) => { if (t === 'keydown' && (e.key === 'Enter' || e.key === 'Escape')) $('tv').blur(); e.stopPropagation(); });
     const fmtT = (s) => { s = Math.max(0, Math.round(s)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
-    const dotPaint = () => { $('dot').dataset.s = mode === 'solve' ? 'work' : mode === 'drive' ? 'drive' : tone || 'idle'; };
+    const dotPaint = () => { $('dot').dataset.s = mode === 'solve' ? 'work' : mode === 'drive' ? 'drive' : tone || 'idle'; $('st').dataset.s = mode === 'idle' ? tone : ''; };
     /** 画进度条。p = 0~100;o = { label 阶段名, steps 阶段名列表, step 当前阶段序号(超过末尾 = 全部完成), time 底部小字 } */
     const setBar = (p, o = {}) => {
       const pct = Math.max(0, Math.min(100, p || 0)), w = pct + '%', has = pct > 0 || !!o.label;
@@ -616,7 +649,7 @@
       $('pg').classList.toggle('idle', !has);
       $('pl').textContent = o.label ?? ''; $('pc').textContent = has && pct > 0 ? Math.floor(pct) + '%' : ''; $('hp').textContent = pct > 0 ? Math.floor(pct) + '%' : '';
       const key = o.steps ? o.steps.join('|') + '#' + o.step : '';
-      if (key !== chipKey) { chipKey = key; $('chips').innerHTML = o.steps ? o.steps.map((t, i) => `<span class="chip ${i < o.step ? 'ok' : i === o.step ? 'on' : ''}">${i < o.step ? '✓ ' : ''}${t}</span>`).join('') : ''; }
+      if (key !== chipKey) { chipKey = key; $('chips').innerHTML = o.steps ? o.steps.map((t, i) => `<span class="chip ${i < o.step ? 'ok' : i === o.step ? 'on' : ''}">${t}</span>`).join('') : ''; }
       $('pt').textContent = o.time ?? '';
     };
     const ui = {
@@ -627,8 +660,8 @@
       getTarget: () => ({ mode: TG.mode, value: TG.mode === 'fast' ? null : parseInt(TG[TG.mode], 10) }),
       targetNote: (t) => { $('tn').textContent = t || ''; },
       onTarget: null,
-      busy: (m) => { mode = m; if (m !== 'idle') $('tv').blur(); tgPaint(); const b = $('go'); b.className = 'go' + (m === 'solve' ? ' busy' : m === 'drive' ? ' stop' : ''); $('gi').textContent = m === 'idle' ? '▶' : '■'; $('gt').textContent = m === 'idle' ? '一键自动驾驶' : m === 'solve' ? '取消求解' : '停止(交还给我)'; dotPaint(); },
-      foot: () => { $('ft').textContent = `v${BUILD.v} · 构建 ${BUILD.t} · ${BUILD.local ? '本机方案 ' + BUILD.local + ' 条' : '公开版'} · 只读榜单、从不上传成绩;成绩是否上传由游戏结算界面决定。`; $('ver').textContent = `v${BUILD.v} · 适配 PolyTrack 0.6.3 · 本地研究用`; },
+      busy: (m) => { mode = m; if (m !== 'idle') $('tv').blur(); tgPaint(); const b = $('go'); b.className = 'go' + (m === 'solve' ? ' busy' : m === 'drive' ? ' stop' : ''); $('gi').innerHTML = m === 'idle' ? ICON_PLAY : ICON_STOP; $('gt').textContent = m === 'idle' ? '一键自动驾驶' : m === 'solve' ? '取消求解' : '停止(交还给我)'; dotPaint(); },
+      foot: () => { $('ft').textContent = `v${BUILD.v} · 构建 ${BUILD.t} · ${BUILD.local ? '本机方案 ' + BUILD.local + ' 条' : '公开版'} · 只读榜单、从不上传成绩;成绩是否上传由游戏结算界面决定。`; $('ver').textContent = `v${BUILD.v}`; },
       /** 简单进度条(自动驾驶 / 清零用):0 = 收起,100 = 完成 */
       bar: (p) => setBar(p, p >= 100 ? { label: '完成' } : {}),
       /** 分阶段进度(求解 / 微调用):pct 总百分比,label 当前阶段,steps / step 阶段条,elapsed 已用秒,rest 估计还需秒(未知为 null) */
@@ -642,7 +675,7 @@
       keys: (toggles, f, mask) => { ks = toggles ? { toggles, f, mask, drawn: false } : null; if (!toggles) { $('keys').classList.remove('on'); $('tl').getContext('2d').clearRect(0, 0, 1e4, 1e4); } },
       root, $, host,
     };
-    tgPaint();
+    tgPaint(); $('gi').innerHTML = ICON_PLAY;
     // ---- 按键显示的绘制 ----
     let ks = null;
     const CAPS = [['k_up', 0], ['k_right', 1], ['k_down', 2], ['k_left', 3], ['k_reset', 4]];
@@ -668,11 +701,11 @@
           const a = t[j], b = j + 1 < t.length ? t[j + 1] : Infinity; // 最后一次按下没有松开 = 按到结束
           if (b < t0 || a > f + FUT) continue;
           const xa = Math.max(x0, xf(a)), xb = Math.min(x0 + pw, xf(b));
-          c.fillStyle = a <= f && b > f ? '#34d399' : b <= f ? '#3b6f8f' : '#93c5fd'; // 正在按 / 已按过 / 将要按
+          c.fillStyle = a <= f && b > f ? '#5eead4' : b <= f ? '#39477c' : '#8b9dff'; // 正在按 / 已按过 / 将要按
           c.fillRect(xa, y + 2, Math.max(1.5, xb - xa), rh - 4);
         }
       });
-      const xn = xf(f); c.fillStyle = '#ffe08a'; c.fillRect(xn - 0.5, 0, 1, H);
+      const xn = xf(f); c.fillStyle = 'rgba(255,255,255,.9)'; c.fillRect(xn - 0.5, 0, 1, H);
     };
     const tick = () => { requestAnimationFrame(tick); if (ks && !ks.drawn) { ks.drawn = true; drawKeys(ks); } };
     requestAnimationFrame(tick);
@@ -777,6 +810,7 @@
       if (GUIDEUI) GUIDEUI.setEnabled(S.guideOn); if (S.guideOn && S.driving && S.guideStart) S.guideStart(); paintGd();
     });
     if (GUIDEUI) GUIDEUI.setEnabled(S.guideOn);
+    { const nm = (c) => ({ Backquote: '`', Backslash: '\\', Space: '␣' }[c] ?? String(c).replace(/^(Key|Digit)/, '')); ui.$('kk').textContent = nm(HOTKEYS.drive[0]); } // 按钮右侧的热键提示跟着 HOTKEYS 走
     ui.$('go').addEventListener('click', () => trigger());
     installHotkeys(ui, () => trigger());
     installInputLock();
