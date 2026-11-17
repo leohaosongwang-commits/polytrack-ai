@@ -47,6 +47,13 @@ test('不拦截上传:清单不声明网络层规则,产物里没有网络 API �
   assert.ok(!js.includes('blocked by PolyTrack AI'));
 });
 
+test('版本号:manifest.json 是唯一来源,油猴脚本头 / 面板页脚 / 构建标记都跟它一致', () => {
+  assert.match(manifest.version, /^\d+\.\d+\.\d+$/);
+  assert.ok(js.includes(`// @version      ${manifest.version}\n`), '油猴脚本头的 @version 要等于 manifest.version');
+  assert.ok(js.includes(`const BUILD = {"v":"${manifest.version}"`), '构建标记里的版本号要等于 manifest.version');
+  assert.ok(js.includes('`v${BUILD.v} · 构建 ${BUILD.t}'), '面板页脚要显示版本号');
+});
+
 test('规划流程:现成方案 → 榜单第 1 名回放 + 页面内微调 → 从零求解,微调核心已打进产物', () => {
   assert.ok(js.includes('async function polishPlan(') && js.includes('exploreLap, polishPlan }'), 'tas_core.mjs 要打进求解器包并导出 polishPlan');
   assert.ok(!js.includes("from './solver.mjs'"), 'tas_core 的 import 要被去掉');
@@ -74,7 +81,7 @@ test('构建产物里没有游戏代码特征(Worker 脚本只在运行时取、
 
 test('占位符都已替换;本机方案通道存在(local.json 被 .gitignore,公开构建里是空表)', () => {
   assert.ok(!js.includes('__BUNDLED_PLANS__') && !js.includes('__LOCAL_PLANS__') && !js.includes('__BUILD_INFO__'));
-  assert.ok(/const BUILD = \{"t":"\d\d-\d\d \d\d:\d\d","local":\d+\}/.test(js)); // 页脚的构建标记
+  assert.ok(/const BUILD = \{"v":"\d+\.\d+\.\d+","t":"\d\d-\d\d \d\d:\d\d","local":\d+\}/.test(js)); // 页脚的构建标记(版本号 + 构建时间 + 本机方案条数)
   assert.ok(js.includes('const LOCAL_SEED = '));
   assert.match(fs.readFileSync(root + '.gitignore', 'utf8'), /extension\/plans\/local\.json/);
 });

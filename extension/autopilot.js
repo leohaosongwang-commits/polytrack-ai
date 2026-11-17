@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PolyTrack AI 自动驾驶(0.6.3,个人研究)
 // @namespace    polytrack-ai
-// @version      0.2.0
+// @version      0.3.0
 // @match        https://app-polytrack.kodub.com/0.6.3/*
 // @run-at       document-start
 // @grant        none
@@ -1438,7 +1438,7 @@ return { GUIDE_STEP, GUIDE_DEFAULTS, buildGuidePath, projectGuide, mulMat4, clip
   /** 本地缓存与内置方案里取更快的那个(都要求已通过 Verify;没有 verified 标记的本地方案也保留,但排在内置之后) */
   // 只在本机用的方案(例如榜单第 1 名回放打底的):由 extension/plans/local.json 在本机构建时内联;该文件被 .gitignore,不进仓库,公开构建(--public)里是空的。
   const LOCAL_SEED = {};
-  const BUILD = {"t":"11-16 18:57","local":0}; // { t: 构建时间, local: 本机方案条数 }
+  const BUILD = {"v":"0.3.0","t":"11-16 19:25","local":0}; // { v: 版本号(来自 manifest.json), t: 构建时间, local: 本机方案条数 }
   const isPlan = (p) => !!p && Number.isFinite(p.finishFrames) && p.finishFrames > 0 && typeof p.recording === 'string'; // 缓存损坏 / 旧格式的不参与比较,免得 sort 的比较器出 NaN
   /** 这条赛道所有可用来源的方案(内置 / 本机导入 / 浏览器缓存),按完成帧从快到慢;同帧数时内置优先(sort 稳定) */
   const planCandidates = (id) => {
@@ -1701,7 +1701,7 @@ return { GUIDE_STEP, GUIDE_DEFAULTS, buildGuidePath, projectGuide, mulMat4, clip
       log: (t) => { lines.push(t); if (lines.length > 40) lines.shift(); $('log').textContent = lines.slice(-6).join('\n'); $('log').scrollTop = 1e9; },
       drive: (f, total) => { $('bar').style.width = Math.min(100, (100 * f) / total) + '%'; $('st').textContent = `自动驾驶中 ${(f / 1000).toFixed(2)} s / ${(total / 1000).toFixed(2)} s`; },
       busy: (mode) => { const b = $('go'); b.className = mode === 'idle' ? '' : mode === 'solve' ? 'busy' : 'stop'; b.textContent = mode === 'idle' ? '▶ 一键自动驾驶' : mode === 'solve' ? '■ 取消求解' : '■ 停止(交还给我)'; },
-      foot: () => { $('ft').textContent = `构建 ${BUILD.t} · ${BUILD.local ? '本机方案 ' + BUILD.local + ' 条' : '公开版'} · 只读榜单、从不上传成绩;成绩是否上传由游戏结算界面决定。`; },
+      foot: () => { $('ft').textContent = `v${BUILD.v} · 构建 ${BUILD.t} · ${BUILD.local ? '本机方案 ' + BUILD.local + ' 条' : '公开版'} · 只读榜单、从不上传成绩;成绩是否上传由游戏结算界面决定。`; },
       bar: (p) => { $('bar').style.width = p + '%'; },
       hint: (t) => { $('hk').textContent = t; },
       setPanel: (on) => { host.style.display = on ? '' : 'none'; },

@@ -83,6 +83,17 @@ node scripts/build_extension.mjs
 
 想在自己机器上用"榜单第 1 名回放打底"之类**不能公开**的方案:放进 `extension/plans/local.json`(`{赛道指纹: {name, finishFrames, toggles, recording, source}}`),这个文件被 `.gitignore`,**不进仓库**;`node scripts/build_extension.mjs` 会把它内联进你本机的 `autopilot.js`,面板显示「本地导入:<source>,已通过游戏 Verify」,与内置方案、浏览器缓存里取更快的那条。`node scripts/build_extension.mjs --public` 产出不含本机方案的公开构建(推送前必须用这个)。方案本身用 `scripts/make_local_plan.mjs --recording-file 回放串.txt --frames N --game-track summer3 --out plan.json` 生成,写入前会用游戏 Verify 校验。
 
+## 版本号与版本记录
+
+版本号只在 [`manifest.json`](manifest.json) 的 `version` 里改一处;`node scripts/build_extension.mjs` 会把它写进油猴脚本头(`@version`)和面板页脚(`v0.3.0 · 构建 MM-DD HH:MM · …`),`chrome://extensions` 的扩展卡片上也显示同一个号——重载扩展(点 ↻)后看这几处就知道 Chrome 加载的是哪一版。
+
+**每到一个阶段性进度就升版本号**(并在下面补一行):新增一个用户能感觉到的功能 / 流程 → 升中间位(0.3.0 → 0.4.0);只是修 bug、换 / 补方案 → 升末位(0.3.0 → 0.3.1)。构建测试会检查 manifest、油猴脚本头、页脚三处一致。
+
+| 版本 | 日期 | 内容 |
+|---|---|---|
+| 0.3.0 | 2026-11-16 | 规划流程改成「现成快方案不算 → 榜单第 1 名回放 + 页面内微调 → 从零求解」,结果存缓存;扩展自己只发两种只读 GET;页脚显示版本号 |
+| 0.2.0 及以前 | — | 页面内求解 + 自动驾驶、按键显示、引导线、内置方案、本机方案通道(`local.json`) |
+
 ## 重新构建
 
 ```bash

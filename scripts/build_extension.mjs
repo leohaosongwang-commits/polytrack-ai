@@ -17,6 +17,8 @@ const strip = (src) => src
 
 const solverBundle = `const __ptSolverMod = (() => {\n${strip(rd('scripts/lib/progress.mjs'))}\n${strip(rd('scripts/lib/refpath.mjs'))}\n${strip(rd('scripts/lib/solver.mjs'))}\n${strip(rd('scripts/lib/tas_core.mjs'))}\n${strip(rd('scripts/lib/explorer.mjs'))}\nreturn { Solver, masksToToggles, togglesToMasks, buildProgress, buildProgressField, buildTrajectoryProgress, exploreLap, polishPlan };\n})();\nwindow.__ptSolver = __ptSolverMod;`;
 const guideBundle = `window.__ptGuideMath = (() => {\n${strip(rd('scripts/lib/guide.mjs'))}\nreturn { GUIDE_STEP, GUIDE_DEFAULTS, buildGuidePath, projectGuide, mulMat4, clipOf, actColor };\n})();\n${rd('extension/src/guide.js')}`;
+// 版本号只在 extension/manifest.json 里改一处;油猴脚本头、面板页脚、chrome://extensions 里显示的都从它来
+const VERSION = JSON.parse(rd('extension/manifest.json')).version;
 const localPlans = !process.argv.includes('--public') && fs.existsSync(root + 'extension/plans/local.json') ? JSON.parse(rd('extension/plans/local.json')) : {};
 const core = rd('extension/src/core.js')
   .replace('__WORKER_SHIM__', () => JSON.stringify(rd('scripts/lib/worker_shim.js')))
@@ -25,12 +27,12 @@ const core = rd('extension/src/core.js')
   // 本机方案(extension/plans/local.json,被 .gitignore):--public 时不内联,公开构建 / 推送用它
   .replace('__LOCAL_PLANS__', () => JSON.stringify(localPlans))
   // 构建标记:面板页脚显示"构建时间 + 本机方案条数",一眼看出 Chrome 里加载的是哪一版(改了文件后要在 chrome://extensions 点 ↻ 才会换成新版)
-  .replace('__BUILD_INFO__', () => JSON.stringify({ t: new Date().toLocaleString('sv-SE', { hour12: false }).slice(5, 16), local: Object.keys(localPlans).length }));
+  .replace('__BUILD_INFO__', () => JSON.stringify({ v: VERSION, t: new Date().toLocaleString('sv-SE', { hour12: false }).slice(5, 16), local: Object.keys(localPlans).length }));
 
 const out = `// ==UserScript==
 // @name         PolyTrack AI 自动驾驶(0.6.3,个人研究)
 // @namespace    polytrack-ai
-// @version      0.2.0
+// @version      ${VERSION}
 // @match        https://app-polytrack.kodub.com/0.6.3/*
 // @run-at       document-start
 // @grant        none
