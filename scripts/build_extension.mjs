@@ -2,7 +2,7 @@
 // 用法:node scripts/build_extension.mjs [--public] [--no-bundled] [--out 路径]
 //   --public       不内联本机方案(extension/plans/local.json),公开构建 / 推送用
 //   --no-bundled   连内置方案(bundled.json)也不内联:做出一份"没有任何现成方案"的产物,只给端到端测试用(配合 --out,别覆盖 extension/autopilot.js)
-// 拼接顺序:配置 -> page_shim.js(window.__pt:Worker 包装、状态解码、评估池)-> progress.mjs + refpath.mjs + solver.mjs + tas_core.mjs + explorer.mjs(去掉 import/export)-> guide.mjs(引导线数学,window.__ptGuideMath)+ extension/src/guide.js(相机钩子 + 叠加层)-> extension/src/core.js。
+// 拼接顺序:配置 -> page_shim.js(window.__pt:Worker 包装、状态解码、评估池)-> progress.mjs + refpath.mjs + solver.mjs + tas_core.mjs + explorer.mjs(去掉 import/export)-> guide.mjs(引导线数学,window.__ptGuideMath)+ extension/src/guide.js(相机钩子 + 叠加层)-> rank.mjs(window.__ptRank:名次 <-> 完成时间)-> extension/src/core.js。
 // 里面只有我们自己写的代码;游戏的 Worker 脚本在用户浏览器里运行时才取到,并只在内存中补丁(blob),不会写进本目录。
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -17,6 +17,8 @@ const strip = (src) => src
 
 const solverBundle = `const __ptSolverMod = (() => {\n${strip(rd('scripts/lib/progress.mjs'))}\n${strip(rd('scripts/lib/refpath.mjs'))}\n${strip(rd('scripts/lib/solver.mjs'))}\n${strip(rd('scripts/lib/tas_core.mjs'))}\n${strip(rd('scripts/lib/explorer.mjs'))}\nreturn { Solver, masksToToggles, togglesToMasks, buildProgress, buildProgressField, buildTrajectoryProgress, exploreLap, polishPlan };\n})();\nwindow.__ptSolver = __ptSolverMod;`;
 const guideBundle = `window.__ptGuideMath = (() => {\n${strip(rd('scripts/lib/guide.mjs'))}\nreturn { GUIDE_STEP, GUIDE_DEFAULTS, buildGuidePath, projectGuide, mulMat4, clipOf, actColor };\n})();\n${rd('extension/src/guide.js')}`;
+// 名次 <-> 完成时间(榜单二分查找 + 选方案规则,纯函数):面板上的"目标名次 / 目标秒数"用
+const rankBundle = `window.__ptRank = (() => {\n${strip(rd('scripts/lib/rank.mjs'))}\nreturn { countFaster, resolveTarget, chooseForTarget, TARGET_TOL_FRAMES };\n})();`;
 // 版本号只在 extension/manifest.json 里改一处;油猴脚本头、面板页脚、chrome://extensions 里显示的都从它来
 const VERSION = JSON.parse(rd('extension/manifest.json')).version;
 const localPlans = !process.argv.includes('--public') && fs.existsSync(root + 'extension/plans/local.json') ? JSON.parse(rd('extension/plans/local.json')) : {};
@@ -46,6 +48,7 @@ const out = `// ==UserScript==
 ${rd('scripts/lib/page_shim.js')}
 ${solverBundle}
 ${guideBundle}
+${rankBundle}
 ${core}
 })();
 `;

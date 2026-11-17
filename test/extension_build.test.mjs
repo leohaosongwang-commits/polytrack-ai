@@ -31,6 +31,17 @@ test('进度条:求解 / 微调按阶段显示百分比,规划器 / 探索 / 打
   assert.ok(js.includes('prefers-reduced-motion'), '尊重系统的"减少动态效果"设置');
 });
 
+test('目标名次 / 秒数:榜单二分(只读)和选方案规则打进产物;带目标的流程不存缓存、标明是别人的回放', () => {
+  for (const k of ['window.__ptRank', 'async function resolveTarget(', 'function chooseForTarget(', 'async function countFaster(', 'async function lbAt(', 'async function fetchRecording(', 'async function resolveTargetFor(', 'async function replayFromEntry(', 'async function obtainPlanTarget(']) assert.ok(js.includes(k), k);
+  assert.ok(js.includes('skip=${skip}&amount=1&onlyVerified=true'), '按下标取榜单:每次一个只读 GET');
+  for (const id of ['id="tg"', 'id="seg"', 'id="tv"', 'id="tn"', 'data-m="rank"', 'data-m="sec"']) assert.ok(js.includes(id), id); // 目标:选择条 / 输入框 / 预览文字
+  assert.ok(js.includes('不是自己的方案') && js.includes('ghost: true'), '榜单回放必须标明是别人的成绩');
+  const seg = js.slice(js.indexOf('async function replayFromEntry('), js.indexOf('// ================= 6. 自动驾驶')); // replayFromEntry + obtainPlanTarget
+  assert.ok(seg.includes('obtainPlanTarget') && !seg.includes('savePlan('), '带目标的流程不能改缓存(缓存里只放自己最快的方案)');
+  assert.ok(js.includes('const tgt = ui.getTarget()') && js.includes('obtainPlanTarget(ui, id, tgt)'), '点击要按面板上的目标走 obtainPlanTarget');
+  assert.ok(js.includes('e.stopPropagation()'), '输入框里打字的按键不能冒泡到游戏');
+});
+
 test('探索式规划已打进产物,并作为规划失败后的兜底', () => {
   assert.ok(js.includes('async function exploreLap(') && js.includes('exploreLap, polishPlan }'));
   assert.ok(js.includes('window.__ptGuideMath') && js.includes('function projectGuide(') && js.includes('window.__ptGuideUI') && js.includes('prepareGuide'), '引导线(相机钩子 + 叠加层 + 数学)要在产物里');
@@ -68,7 +79,7 @@ test('规划流程:现成方案 → 榜单第 1 名回放 + 页面内微调 → 
   for (const k of ['async function obtainPlan(', 'async function deriveFromTop(', 'async function fetchTop1(', 'async function decodeRecordingWeb(', 'async function trackId64(']) assert.ok(js.includes(k), k);
   assert.ok(js.includes("order: 'backward'"), '页面内微调从终点往起点扫');
   assert.ok(js.includes('不慢于榜单第 1 名') && js.includes('SOLVER.polishPlan(g, toggles, top.frames'));
-  assert.ok(js.includes('const r = await obtainPlan(ui, id)'), '点击要走 obtainPlan,而不是直接 loadPlan / solve');
+  assert.ok(js.includes("tgt.mode === 'fast' ? await obtainPlan(ui, id) : await obtainPlanTarget(ui, id, tgt)"), '点击要走 obtainPlan(「最快」)/ obtainPlanTarget(带目标),而不是直接 loadPlan / solve');
   assert.ok(fs.readFileSync(root + 'scripts/lib/worker_shim.js', 'utf8').includes('trackId = tr.getId()'), 'Worker 的 track 消息要带上游戏自己算的 trackId');
 });
 

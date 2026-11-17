@@ -214,3 +214,54 @@ test('引导线:坡顶后面被挡住的那段淡出(地平线裁剪)', () => {
   for (let r = 0; r < g.rows; r++) { const d = 6 + r * 0.6; if (d < 50) maxBefore = Math.max(maxBefore, alphaAt(r)); if (d > 70) maxAfter = Math.max(maxAfter, alphaAt(r)); }
   assert.ok(maxBefore > 0.4, '坡顶前应该看得见: ' + maxBefore); assert.ok(maxAfter < 0.05, '坡顶后应该被挡住: ' + maxAfter);
 });
+
+// ---- 名次 <-> 完成时间(scripts/lib/rank.mjs):假榜单上的二分查找和方案选择规则 ----
+import { countFaster, resolveTarget, chooseForTarget, TARGET_TOL_FRAMES } from '../scripts/lib/rank.mjs';
+const fakeBoard = (frames) => { const calls = []; const lbAt = async (i) => { calls.push(i); const f = frames[i]; return { total: frames.length, entry: f == null ? null : { frames: f, id: 'e' + i } }; }; return { lbAt, calls }; };
+// 22123 起每名 +1~3 帧,中间夹着一大片同帧并列(模拟真实榜单:前 3000 名只差 0.5 s,大量并列)
+const mkFrames = (n, seed = 7) => { let s = seed, f = 22123; const out = []; for (let i = 0; i < n; i++) { s = (s * 1103515245 + 12345) & 0x7fffffff; out.push(f); f += s % 3 === 0 ? 0 : 1 + (s >> 8) % 3; } return out; };
+test('名次:取第 N 名的完成帧;超过总人数取最后一名并标记 clamped', async () => {
+  const fr = mkFrames(1000); const { lbAt } = fakeBoard(fr);
+  const r = await resolveTarget(lbAt, { mode: 'rank', value: 50 });
+  assert.equal(r.rank, 50); assert.equal(r.frames, fr[49]); assert.equal(r.entry.id, 'e49'); assert.equal(r.clamped, false);
+  const r1 = await resolveTarget(lbAt, { mode: 'rank', value: 1 }); assert.equal(r1.frames, fr[0]);
+  const big = await resolveTarget(lbAt, { mode: 'rank', value: 5000 }); assert.equal(big.rank, 1000); assert.equal(big.clamped, true); assert.equal(big.frames, fr[999]);
+});
+test('秒数:二分出的名次 = 比目标更快的人数 + 1(和暴力数一致),且探测次数 <= log2(总数) + 1', async () => {
+  const fr = mkFrames(20000);
+  for (const sec of [1, 22, 23, 24, 25, 30, 60]) {
+    const { lbAt, calls } = fakeBoard(fr); const r = await resolveTarget(lbAt, { mode: 'sec', value: sec });
+    const faster = fr.filter((x) => x < sec * 1000).length;
+    assert.equal(r.rank, faster + 1, `${sec} s`); assert.equal(r.frames, sec * 1000);
+    assert.ok(new Set(calls).size <= Math.ceil(Math.log2(fr.length)) + 3, `探测 ${new Set(calls).size} 次`);
+    // 取到的那一条是离目标最近的(要么是第一个不快于目标的,要么是它前面那条)
+    const lo = faster; const best = [lo - 1, lo].filter((i) => i >= 0 && i < fr.length).sort((a, b) => Math.abs(fr[a] - sec * 1000) - Math.abs(fr[b] - sec * 1000) || fr[b] - fr[a])[0];
+    assert.equal(Math.abs(r.entry.frames - sec * 1000), Math.abs(fr[best] - sec * 1000), `${sec} s 最接近的那条`);
+  }
+});
+test('秒数:比第 1 名还快 -> 名次 1;比最后一名还慢 -> 名次 total + 1;并列取不更快的那条', async () => {
+  const fr = [22000, 22000, 22500, 23000, 23000, 23000];
+  let r = await resolveTarget(fakeBoard(fr).lbAt, { mode: 'sec', value: 20 }); assert.equal(r.rank, 1); assert.equal(r.idx, 0);
+  r = await resolveTarget(fakeBoard(fr).lbAt, { mode: 'sec', value: 99 }); assert.equal(r.rank, fr.length + 1); assert.equal(r.idx, fr.length - 1);
+  r = await resolveTarget(fakeBoard(fr).lbAt, { mode: 'sec', value: 23 }); assert.equal(r.rank, 4); assert.equal(r.entry.frames, 23000); assert.equal(r.idx, 3); // 前面有 3 个更快的;并列的第一条
+  r = await resolveTarget(fakeBoard([22000, 24000]).lbAt, { mode: 'sec', value: 23 }); assert.equal(r.entry.frames, 24000); // 两边一样远(都差 1000):取不比目标更快的那条
+});
+test('目标填错 / 榜单异常:抛出带原因的错误,不死循环', async () => {
+  await assert.rejects(resolveTarget(fakeBoard([22000]).lbAt, { mode: 'rank', value: 0 }), /整数/);
+  await assert.rejects(resolveTarget(fakeBoard([22000]).lbAt, { mode: 'rank', value: 'abc' }), /整数/);
+  await assert.rejects(resolveTarget(fakeBoard([]).lbAt, { mode: 'rank', value: 3 }), /空/);
+  await assert.rejects(resolveTarget(fakeBoard([22000]).lbAt, { mode: 'bogus', value: 3 }), /未知/);
+  await assert.rejects(countFaster(async () => ({ total: 9, entry: { frames: 1, id: 'x' } }), 2 ** 60, 5), /超限/); // 总数大到不可能:探测次数封顶
+  await assert.rejects(countFaster(async () => ({ total: 3, entry: null }), 3, 5), /不完整/);
+});
+test('选哪条方案:目标附近用自己的 / 自己比目标快很多用榜单回放 / 自己比目标慢先提速;第 1 名越快越好', () => {
+  const T = TARGET_TOL_FRAMES; const rk = (rank, frames) => ({ mode: 'rank', rank, frames }); const sc = (frames) => ({ mode: 'sec', rank: 1000, frames });
+  assert.equal(chooseForTarget(null, rk(50, 22303)), 'replay', '没有方案 -> 用回放');
+  assert.equal(chooseForTarget(22107, rk(50, 22303)), 'replay', '自己快 196 帧,调不慢 -> 回放');
+  assert.equal(chooseForTarget(22303 - T, rk(50, 22303)), 'own'); assert.equal(chooseForTarget(22303 + T, rk(50, 22303)), 'own');
+  assert.equal(chooseForTarget(22303 + T + 1, rk(50, 22303)), 'improve', '自己比目标慢 -> 先提速');
+  assert.equal(chooseForTarget(22107, rk(1, 22123)), 'own', '第 1 名:自己更快也用自己的');
+  assert.equal(chooseForTarget(22123 + T, rk(1, 22123)), 'own'); assert.equal(chooseForTarget(22200, rk(1, 22123)), 'improve');
+  assert.equal(chooseForTarget(22107, sc(23000)), 'replay'); assert.equal(chooseForTarget(22107, sc(22000)), 'improve', '目标秒数比自己还快 -> 提速');
+  assert.equal(chooseForTarget(22107, sc(22100)), 'own');
+});

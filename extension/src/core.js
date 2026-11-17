@@ -8,6 +8,8 @@
 //       a. 已有现成方案(内置 / 本机导入 / 浏览器缓存)而且不慢于榜单第 1 名 → 直接用,什么都不算;
 //       b. 否则取榜单第 1 名的回放(只读),过游戏自带 Verify,再在页面里微调(每次接受都用真实完成帧、最后再过 Verify),结果存进本赛道缓存,下次直接用;
 //       c. 榜单读不到 / 没有第 1 名 / 回放校验不过 → 从零求解(滚动时域规划 + 探索式兜底 + 打磨 + Verify),同样存缓存;
+//     面板上可以改成"目标名次 / 目标秒数"(整数):按榜单算出对应的完成时间 / 名次;自己的方案比目标快得多时调不慢(逐帧打磨过的方案一动就跑不到终点),
+//     所以改用榜单上那一名的回放(只读取得、过游戏 Verify,不存进缓存,界面上标明是别人的成绩);
 //  4. 自动驾驶:在精确的物理帧注入键盘事件(帧号来自求解结果),所以每次开的结果和求解时逐帧一致;
 //  5. 网络:扩展只做两种只读 GET(vps.kodub.com 的榜单 / 回放接口,不带令牌,和游戏自己看榜单发的同类请求),从不 POST、不上传任何成绩,
 //     也不包装游戏的任何网络 API;成绩是否上传完全由游戏结算界面决定。
@@ -15,6 +17,7 @@
   const PT = window.__pt;
   const SOLVER = window.__ptSolver; // { Solver }
   const GUIDE = window.__ptGuideMath, GUIDEUI = window.__ptGuideUI; // 引导线(见 extension/src/guide.js)
+  const RANK = window.__ptRank; // 名次 <-> 完成时间:{ resolveTarget, chooseForTarget, … }(见 scripts/lib/rank.mjs)
   const GAME_BASE = 'https://app-polytrack.kodub.com/0.6.3/';
   const WORKER_SHIM = __WORKER_SHIM__;
   const EVAL_CASES = __EVAL_CASES__;
@@ -214,14 +217,22 @@
     const ti = await makeG(src).trackInfo(); const tid = ti && !ti.error && /^[0-9a-f]{64}$/.test(ti.trackId || '') ? ti.trackId : null;
     if (tid) trackId64Cache.set(id, tid); return tid;
   }
+  /** 榜单(只看已验证的、完成帧升序)的第 skip 条,0 起;每次一个只读 GET。返回 { total 榜单总条数, entry: { frames, id } | null }(只取这两个字段,不碰昵称等) */
+  async function lbAt(tid, skip) {
+    const lb = await lbGet(`leaderboard?version=0.6.3&trackId=${tid}&skip=${skip}&amount=1&onlyVerified=true`);
+    const e = lb && Array.isArray(lb.entries) ? lb.entries[0] : null;
+    return { total: lb && Number.isFinite(lb.total) ? lb.total : 0, entry: e && Number.isInteger(e.frames) && e.frames > 0 && e.id != null ? { frames: e.frames, id: e.id } : null };
+  }
+  /** 榜单上某一条的回放串(只读 GET);没有 / 格式不对返回 null */
+  async function fetchRecording(entryId) {
+    const rec = await lbGet(`recordings?version=0.6.3&ids=${encodeURIComponent(String(entryId))}`);
+    const r = Array.isArray(rec) && rec[0] ? rec[0].recording : null; return typeof r === 'string' && r ? r : null;
+  }
   /** 榜单第 1 名(只看已验证的)的完成帧 + 回放串;没有 / 数据不对就返回 null */
   async function fetchTop1(tid) {
-    const lb = await lbGet(`leaderboard?version=0.6.3&trackId=${tid}&skip=0&amount=1&onlyVerified=true`);
-    const e = lb && Array.isArray(lb.entries) ? lb.entries[0] : null;
-    if (!e || !Number.isInteger(e.frames) || e.frames <= 0 || e.id == null) return null;
-    const rec = await lbGet(`recordings?version=0.6.3&ids=${encodeURIComponent(String(e.id))}`);
-    const recording = Array.isArray(rec) && rec[0] ? rec[0].recording : null;
-    return typeof recording === 'string' && recording ? { frames: e.frames, recording } : null;
+    const { entry } = await lbAt(tid, 0); if (!entry) return null;
+    const recording = await fetchRecording(entry.id);
+    return recording ? { frames: entry.frames, recording } : null;
   }
   const verifyExact = async (g, rec, fin) => { const at = await g.verify(rec, fin, 1); const m1 = await g.verify(rec, fin - 1, 1); const p1 = await g.verify(rec, fin + 1, 1); return at[0].result === true && m1[0].result === false && p1[0].result === false; };
 
@@ -286,6 +297,71 @@
     const old = loadLocal(id); if (isPlan(old)) return { plan: old, canceled: false }; // 以前求解但没通过 Verify 的方案:和过去一样照用
     ui.busy('solve');
     return { plan: await solve(ui), canceled: false };
+  }
+
+  // ================= 5c. 目标名次 / 目标秒数 =================
+  // 面板上填一个整数名次(或秒数),这里按榜单(只读)算出对应的完成时间(或名次),再决定开哪条方案(规则见 scripts/lib/rank.mjs 的 chooseForTarget)。
+  // 自己的方案调不慢:逐帧打磨过的方案一动就跑不到终点(实测:整体后移 / 起点多等 / 插入刹车或松油门,几乎都冲不了线),
+  // 所以比目标快得多时用榜单上那一名的回放(过游戏 Verify;不存缓存,界面上标明是别人的成绩)。
+  const fmtN = (n) => Number(n).toLocaleString('en-US');
+  /** 目标(名次或秒数)按榜单算成 { rank, frames, entry, idx, total, … };榜单读不到 / 数据不对就抛错 */
+  async function resolveTargetFor(id, src, tgt) {
+    const tid = await trackId64(src, id); if (!tid) throw new Error('读不到赛道编号');
+    const memo = new Map(); const at = (i) => { let p = memo.get(i); if (!p) { p = lbAt(tid, i); memo.set(i, p); } return p; };
+    return RANK.resolveTarget(at, tgt);
+  }
+  /** 目标换成一句话:"第 50 名 ≈ 22.303 s" / "23 s ≈ 第 1,234 名" */
+  const targetText = (r) => r.mode === 'rank'
+    ? `第 ${fmtN(r.rank)} 名 ≈ ${secStr(r.frames)}${r.clamped ? `(榜单只有 ${fmtN(r.total)} 人,取最后一名)` : ''}`
+    : `${r.frames / 1000} s ≈ ${r.rank > r.total ? `比榜单最后一名(${fmtN(r.total)})还慢` : `第 ${fmtN(r.rank)} 名`}`;
+  /** 这个目标下会用哪条方案(面板预览和点击时的日志共用) */
+  function targetPlanText(how, r, have) {
+    const mine = have ? `本机方案 ${secStr(have.finishFrames)}` : '本赛道还没有方案';
+    if (how === 'own') return `${mine},就在目标附近 → 用它`;
+    if (how === 'replay') return `${mine}${have ? ',比目标快' : ''} → 用榜单第 ${fmtN(r.idx + 1)} 名(${secStr(r.entry.frames)})的回放,不是自己的方案`;
+    return `${mine},比目标慢 → 先尽量提速,到不了就按能到的开`;
+  }
+  /** 榜单上某一条(r.entry)的回放当方案:只读取回放,过游戏自带 Verify(完成帧恰好对、少 1 帧不行)才用;不存缓存(缓存里只放自己最快的方案)。不能用就返回 null */
+  async function replayFromEntry(ui, src, r) {
+    const g = makeG(src), e = r.entry, nth = r.idx + 1;
+    ui.status(`取榜单第 ${fmtN(nth)} 名的回放(只读)…`); ui.wait('取回放');
+    const recording = await fetchRecording(e.id); if (!recording) { ui.log('榜单没给出这条回放'); return null; }
+    let toggles; try { toggles = await decodeRecordingWeb(recording); } catch (err) { ui.log('回放解码失败:' + String(err.message).slice(0, 60)); return null; }
+    if (S.cancel) return null;
+    ui.status(`榜单第 ${fmtN(nth)} 名 ${secStr(e.frames)}:用游戏自带 Verify 复核它的回放…`); ui.wait('复核回放');
+    const v0 = await g.verify(recording, e.frames, 1); const v1 = await g.verify(recording, e.frames - 1, 1);
+    if (!(v0[0].result === true && v1[0].result === false)) { ui.log('这条回放在当前赛道上没通过游戏的 Verify,不用'); return null; }
+    ui.log(`回放通过 Verify:${secStr(e.frames)}(榜单第 ${fmtN(nth)} 名;不存缓存)`);
+    return { v: 1, finishFrames: e.frames, toggles, recording, verified: true, ghost: true, rank: nth, source: `榜单第 ${fmtN(nth)} 名的回放(只读取得;别人的成绩,不是自己的方案)`, solvedAt: Date.now() };
+  }
+  /**
+   * 带目标的规划总入口(点击时,面板上的目标不是"最快"时调用):
+   *  1. 按榜单(只读)把目标算成完成帧 + 榜单上最接近的那一条;读不到就抛错(不悄悄改成"最快");
+   *  2. chooseForTarget:own = 现成方案就在目标附近,直接用;replay = 现成方案比目标快很多(或没有方案),取榜单那一条的回放、过 Verify 后开;
+   *     improve = 现成方案比目标慢,走原来的 obtainPlan(取榜单第 1 名回放微调 / 从零求解)尽量提速;回放不能用也退回这一步。
+   * 返回 { plan, canceled, targetText };canceled 时 plan 可能为 null。
+   */
+  async function obtainPlanTarget(ui, id, tgt) {
+    const src = primaryIdx(); if (src < 0) throw new Error('游戏还没准备好(先选好赛道、看到起点画面)');
+    const have = planCandidates(id)[0] ?? null; let r;
+    S.solving = true; S.cancel = false; ui.busy('solve'); ui.status('按目标算榜单上的位置…'); ui.wait('读榜单');
+    try { r = await resolveTargetFor(id, src, tgt); }
+    catch (e) { throw new Error(`读榜单失败(${String(e.message || e).slice(0, 40)}),没法按${tgt.mode === 'rank' ? '名次' : '秒数'}算;可以切回「最快」`); }
+    finally { S.solving = false; }
+    if (S.cancel) return { plan: have, canceled: true };
+    const how = RANK.chooseForTarget(have ? have.finishFrames : null, r); const tt = `目标 ${targetText(r)}`;
+    ui.log(`${tt};${targetPlanText(how, r, have)}`);
+    if (how === 'own') return { plan: have, canceled: false, targetText: tt };
+    if (how === 'replay') {
+      let p = null; S.solving = true; S.cancel = false; ui.busy('solve');
+      try { p = await replayFromEntry(ui, src, r); } catch (e) { ui.log('取回放出错:' + String(e.message || e).slice(0, 80)); }
+      finally { S.solving = false; for (const w of PT.pool) w.w.terminate(); PT.pool = []; }
+      if (S.cancel) return { plan: have, canceled: true };
+      if (p) return { plan: p, canceled: false, targetText: tt };
+      ui.log(have ? '这条回放用不了,改用现成方案 / 最快流程' : '这条回放用不了,改走"最快"流程');
+    }
+    const rr = await obtainPlan(ui, id);
+    return { ...rr, targetText: `${tt}(做不到,按能到的最快开)` };
   }
 
   // ================= 6. 自动驾驶 =================
@@ -405,7 +481,7 @@
       .dot[data-s=err]{background:#f43f5e}
       .dot[data-s=warn]{background:#fbbf24}
       @keyframes pulse{50%{opacity:.35;transform:scale(.8)}}
-      .st{flex:1;min-width:0;min-height:18px;color:#f5e6b3;word-break:break-word;user-select:text}
+      .st{flex:1;min-width:0;min-height:18px;color:#f5e6b3;word-break:break-word;white-space:pre-line;user-select:text}
       .pg{margin-top:10px}
       .pg.idle .pr,.pg.idle .chips,.pg.idle .pt{display:none}
       .pg.idle .trk{height:4px;margin-top:0}
@@ -448,6 +524,21 @@
       .k.r.off{visibility:hidden}
       .kt{font-size:13px;font-weight:600;color:#bff3df;min-height:18px}
       #tl{display:block;width:100%;height:50px;margin-top:8px;border-radius:6px;background:rgba(0,0,0,.28)}
+      .tg{margin-top:10px;padding:7px 10px 8px;border-radius:10px;background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.06);transition:opacity .15s}
+      .tg.dis{opacity:.5;pointer-events:none}
+      .tgh{display:flex;align-items:center;gap:9px}
+      .tgl{flex:none;font-size:11px;color:#aeb8e6}
+      .seg{flex:1;display:flex;padding:2px;border-radius:8px;background:rgba(0,0,0,.3)}
+      .seg button{flex:1;padding:3px 0;border-radius:6px;font-size:11px;color:#8f9bc9;transition:background .15s,color .15s}
+      .seg button:hover{color:#fff}
+      .seg button.on{background:linear-gradient(135deg,#3b82f6,#06b6d4);color:#fff;font-weight:700}
+      .tin{display:none;align-items:center;gap:7px;margin-top:8px;font-size:12px;color:#cdd5f7}
+      .tg.m-rank .tin,.tg.m-sec .tin{display:flex}
+      .tin input{all:unset;box-sizing:border-box;width:86px;padding:4px 8px;border-radius:7px;background:rgba(0,0,0,.36);border:1px solid rgba(255,255,255,.14);color:#fff;font:700 13px/1.25 ui-monospace,SFMono-Regular,Menlo,monospace;text-align:right;user-select:text;transition:border-color .15s,box-shadow .15s}
+      .tin input:focus{border-color:#22d3ee;box-shadow:0 0 0 2px rgba(34,211,238,.22)}
+      .tin input::placeholder{color:#59638a}
+      .tn{margin-top:6px;font-size:10.5px;line-height:1.5;color:#8f9bc9;white-space:pre-line;word-break:break-word;user-select:text}
+      .tn:empty,.tg.m-fast .tn{display:none}
       @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
     </style>
     <div class="box" id="box">
@@ -460,6 +551,11 @@
       <div class="mini"><i id="mbar"></i></div>
       <div class="bd" id="bd">
         <button class="go" id="go" tabindex="-1"><span class="gi" id="gi">▶</span><span id="gt">一键自动驾驶</span></button>
+        <div class="tg m-fast" id="tg">
+          <div class="tgh"><span class="tgl">目标</span><div class="seg" id="seg"><button data-m="fast" tabindex="-1" title="尽量快(默认)">最快</button><button data-m="rank" tabindex="-1" title="填一个整数名次:跑完大约排这个名次">名次</button><button data-m="sec" tabindex="-1" title="填一个整数秒数:跑完大约是这个时间">秒数</button></div></div>
+          <div class="tin"><span id="tp">跑完约第</span><input id="tv" type="text" inputmode="numeric" maxlength="7" autocomplete="off" spellcheck="false" placeholder="50"><span id="ts">名</span></div>
+          <div class="tn" id="tn"></div>
+        </div>
         <div class="card"><i class="dot" id="dot" data-s="idle"></i><div class="st" id="st">待命</div></div>
         <div class="pg idle" id="pg">
           <div class="pr"><span class="pl" id="pl"></span><span class="pc" id="pc"></span></div>
@@ -496,6 +592,20 @@
     window.addEventListener('resize', () => { if (box.style.left) { const r = box.getBoundingClientRect(); place(r.left, r.top); } });
     // ---- 状态 / 进度 ----
     const lines = []; let mode = 'idle', tone = '', chipKey = '';
+    // ---- 目标(最快 / 名次 / 秒数):选择和填的数字都记在 localStorage;只允许 1~7 位整数。真正的计算在 boot() 里(按榜单算,见 obtainPlanTarget) ----
+    const TG = { mode: 'fast', rank: '', sec: '' }, digits = (v) => String(v ?? '').replace(/\D/g, '').slice(0, 7);
+    try { const t = JSON.parse(lsGet('ptai:target') || 'null'); if (t && ['fast', 'rank', 'sec'].includes(t.mode)) { TG.mode = t.mode; TG.rank = digits(t.rank); TG.sec = digits(t.sec); } } catch { /* ignore */ }
+    const tgSave = () => lsSet('ptai:target', JSON.stringify(TG));
+    const tgPaint = () => {
+      $('tg').className = 'tg m-' + TG.mode + (mode !== 'idle' ? ' dis' : '');
+      for (const b of $('seg').querySelectorAll('button')) b.classList.toggle('on', b.dataset.m === TG.mode);
+      $('tp').textContent = TG.mode === 'rank' ? '跑完约第' : '跑完约'; $('ts').textContent = TG.mode === 'rank' ? '名' : '秒'; $('tv').placeholder = TG.mode === 'rank' ? '50' : '23';
+      if (TG.mode !== 'fast' && $('tv').value !== TG[TG.mode]) $('tv').value = TG[TG.mode];
+    };
+    $('seg').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b || b.dataset.m === TG.mode) return; TG.mode = b.dataset.m; tgSave(); tgPaint(); ui.onTarget && ui.onTarget(); });
+    $('tv').addEventListener('input', () => { const v = digits($('tv').value); if (v !== $('tv').value) $('tv').value = v; if (TG.mode !== 'fast') TG[TG.mode] = v; tgSave(); ui.onTarget && ui.onTarget(); });
+    // 在输入框里打字时不让按键冒泡到游戏(游戏在 window 上监听 WASD / R / T 等);Enter / Esc 退出输入、把键盘还给游戏
+    for (const t of ['keydown', 'keyup', 'keypress']) $('tv').addEventListener(t, (e) => { if (t === 'keydown' && (e.key === 'Enter' || e.key === 'Escape')) $('tv').blur(); e.stopPropagation(); });
     const fmtT = (s) => { s = Math.max(0, Math.round(s)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
     const dotPaint = () => { $('dot').dataset.s = mode === 'solve' ? 'work' : mode === 'drive' ? 'drive' : tone || 'idle'; };
     /** 画进度条。p = 0~100;o = { label 阶段名, steps 阶段名列表, step 当前阶段序号(超过末尾 = 全部完成), time 底部小字 } */
@@ -513,7 +623,11 @@
       status: (t) => { $('st').textContent = t; tone = /^完成/.test(t) ? 'ok' : /失败|出错/.test(t) ? 'err' : /^已(停止|取消)/.test(t) ? 'warn' : ''; dotPaint(); },
       log: (t) => { lines.push(t); if (lines.length > 40) lines.shift(); $('log').textContent = lines.slice(-6).join('\n'); $('log').scrollTop = 1e9; },
       drive: (f, total) => { setBar((100 * f) / total, { label: '自动驾驶', time: `${(f / 1000).toFixed(2)} s / ${(total / 1000).toFixed(2)} s` }); $('st').textContent = `自动驾驶中 ${(f / 1000).toFixed(2)} s / ${(total / 1000).toFixed(2)} s`; },
-      busy: (m) => { mode = m; const b = $('go'); b.className = 'go' + (m === 'solve' ? ' busy' : m === 'drive' ? ' stop' : ''); $('gi').textContent = m === 'idle' ? '▶' : '■'; $('gt').textContent = m === 'idle' ? '一键自动驾驶' : m === 'solve' ? '取消求解' : '停止(交还给我)'; dotPaint(); },
+      /** 目标:{ mode: 'fast' | 'rank' | 'sec', value: 整数(fast 时为 null;没填 / 不是数字为 NaN) } */
+      getTarget: () => ({ mode: TG.mode, value: TG.mode === 'fast' ? null : parseInt(TG[TG.mode], 10) }),
+      targetNote: (t) => { $('tn').textContent = t || ''; },
+      onTarget: null,
+      busy: (m) => { mode = m; if (m !== 'idle') $('tv').blur(); tgPaint(); const b = $('go'); b.className = 'go' + (m === 'solve' ? ' busy' : m === 'drive' ? ' stop' : ''); $('gi').textContent = m === 'idle' ? '▶' : '■'; $('gt').textContent = m === 'idle' ? '一键自动驾驶' : m === 'solve' ? '取消求解' : '停止(交还给我)'; dotPaint(); },
       foot: () => { $('ft').textContent = `v${BUILD.v} · 构建 ${BUILD.t} · ${BUILD.local ? '本机方案 ' + BUILD.local + ' 条' : '公开版'} · 只读榜单、从不上传成绩;成绩是否上传由游戏结算界面决定。`; $('ver').textContent = `v${BUILD.v} · 适配 PolyTrack 0.6.3 · 本地研究用`; },
       /** 简单进度条(自动驾驶 / 清零用):0 = 收起,100 = 完成 */
       bar: (p) => setBar(p, p >= 100 ? { label: '完成' } : {}),
@@ -528,6 +642,7 @@
       keys: (toggles, f, mask) => { ks = toggles ? { toggles, f, mask, drawn: false } : null; if (!toggles) { $('keys').classList.remove('on'); $('tl').getContext('2d').clearRect(0, 0, 1e4, 1e4); } },
       root, $, host,
     };
+    tgPaint();
     // ---- 按键显示的绘制 ----
     let ks = null;
     const CAPS = [['k_up', 0], ['k_right', 1], ['k_down', 2], ['k_left', 3], ['k_reset', 4]];
@@ -600,12 +715,13 @@
   }
 
   function boot() {
-    const ui = makePanel(); let running = false; let sticky = null; // sticky:最近一次结果,留在面板上直到再次点击或换赛道
+    const ui = makePanel(); let running = false; let pvId = null; let sticky = null; // sticky:最近一次结果,留在面板上直到再次点击或换赛道
     const refresh = () => {
       ui.foot();
       if (running) return;
       const id = curTrackId();
       if (!id) { ui.status('等待游戏就绪:请先选好赛道,看到起点画面'); return; }
+      if (id !== pvId) { pvId = id; if (ui.onTarget) ui.onTarget(); } // 换了赛道 / 游戏刚就绪:目标预览重算一次
       if (sticky && sticky.id === id) { ui.status(sticky.text); return; }
       const cands = planCandidates(id); const p = cands[0] ?? loadLocal(id); const others = cands.slice(1).map((x) => `${x.from} ${(x.finishFrames / 1000).toFixed(3)} s`);
       ui.status(p ? `本赛道已有方案:${(p.finishFrames / 1000).toFixed(3)} s${p.bundled ? '(内置方案' + (p.name ? ':' + p.name : '') + ',已通过游戏 Verify)' : p.source ? '(本地导入:' + p.source + (p.verified ? ',已通过游戏 Verify)' : ',未验证)') : p.verified ? '(已通过游戏 Verify)' : ''}${others.length ? ' · 另有 ' + others.join('、') : ''}` : '本赛道还没有方案:点击后先取榜单第 1 名的回放并微调(约 ' + Math.max(1, Math.round(polishBudget() / 60)) + ' 分钟),取不到再从零求解;之后自动驾驶,下次直接开');
@@ -621,19 +737,39 @@
       running = true; sticky = null; // 面板状态保持原样:隐藏着启动自动驾驶就不弹出来,用快捷键照样能停
       try {
         const id = curTrackId(); if (!id) { ui.status('游戏还没准备好'); return; }
-        let plan; // 现成方案够快就直接用;否则取榜单第 1 名回放微调;再不行从零求解(见 obtainPlan)
+        const tgt = ui.getTarget(); // 目标:最快(默认)/ 名次 / 秒数
+        if (tgt.mode !== 'fast' && !(tgt.value >= 1)) { const text = `目标要填 ≥ 1 的整数(${tgt.mode === 'rank' ? '名次' : '秒数'}),或者切回「最快」`; sticky = { id, text }; ui.status(text); return; }
+        let plan, tText = ''; // 现成方案够快就直接用;否则取榜单第 1 名回放微调;再不行从零求解(见 obtainPlan);带目标时见 obtainPlanTarget
         try {
-          const r = await obtainPlan(ui, id); plan = r.plan;
-          if (r.canceled) { const text = `已取消微调:方案 ${(plan.finishFrames / 1000).toFixed(3)} s 已存好,再点一次直接开`; sticky = { id, text }; ui.status(text); ui.bar(0); ui.busy('idle'); return; }
+          const r = tgt.mode === 'fast' ? await obtainPlan(ui, id) : await obtainPlanTarget(ui, id, tgt); plan = r.plan; tText = r.targetText || '';
+          if (r.canceled) { const text = plan ? `已取消微调:方案 ${(plan.finishFrames / 1000).toFixed(3)} s 已存好,再点一次直接开` : '已取消'; sticky = { id, text }; ui.status(text); ui.bar(0); ui.busy('idle'); return; }
         } catch (e) { ui.status('求解失败:' + e.message); ui.log('求解失败: ' + e.message); sticky = { id, text: '求解失败:' + e.message }; ui.bar(0); ui.busy('idle'); return; }
-        ui.bar(0); ui.busy('drive'); ui.status('自动驾驶:回到起点并出发…');
+        S.lastPlan = plan; ui.bar(0); ui.busy('drive'); ui.status(plan.ghost ? `自动驾驶:回到起点并出发(用的是${plan.source})` : '自动驾驶:回到起点并出发…');
         const r = await drive(plan, ui);
-        const text = r.finished != null ? `完成:${(r.finished / 1000).toFixed(3)} s(方案 ${(plan.finishFrames / 1000).toFixed(3)} s)` : '已停止';
+        const text = r.finished != null ? `完成:${(r.finished / 1000).toFixed(3)} s(方案 ${(plan.finishFrames / 1000).toFixed(3)} s)${plan.ghost ? `\n开的是榜单第 ${fmtN(plan.rank)} 名的回放(别人的成绩,不是自己的方案)` : ''}${tText ? '\n' + tText : ''}` : '已停止';
         sticky = { id, text }; ui.status(text);
         ui.bar(r.finished != null ? 100 : 0);
       } catch (e) { ui.status('出错:' + e.message); ui.log('出错: ' + e.message); sticky = { id: curTrackId(), text: '出错:' + e.message }; ui.bar(0); }
       finally { running = false; ui.busy('idle'); }
     };
+    // ---- 目标预览:改了名次 / 秒数(或切换类型)后过一会儿按榜单算一下,告诉用户对应多少秒 / 第几名、会用哪条方案(榜单读不到就只提示) ----
+    let pvSeq = 0, pvTimer = 0;
+    ui.onTarget = () => {
+      clearTimeout(pvTimer); const my = ++pvSeq, t = ui.getTarget();
+      if (t.mode === 'fast') { ui.targetNote(''); return; }
+      if (!(t.value >= 1)) { ui.targetNote(t.mode === 'rank' ? '填一个整数名次,例如 50' : '填一个整数秒数,例如 23'); return; }
+      ui.targetNote('算榜单上的位置…');
+      pvTimer = setTimeout(async () => {
+        try {
+          const id = curTrackId(), src = primaryIdx(); if (!id || src < 0) { ui.targetNote('等游戏就绪(选好赛道、看到起点画面)后点开始时再算'); return; }
+          if (running || S.solving || S.driving) { ui.targetNote(''); return; }
+          const r = await resolveTargetFor(id, src, t); if (my !== pvSeq) return;
+          const have = planCandidates(id)[0] ?? null;
+          ui.targetNote(`${targetText(r)}\n${targetPlanText(RANK.chooseForTarget(have ? have.finishFrames : null, r), r, have)}`);
+        } catch (e) { if (my === pvSeq) ui.targetNote('榜单读不到(' + String(e.message || e).slice(0, 40) + '),点开始时会再试'); }
+      }, 700);
+    };
+    ui.onTarget();
     const paintGd = () => { const b = ui.$('gd'); b.title = '引导线:' + (S.guideOn ? '开(点击关闭)' : '关(点击打开)'); b.classList.toggle('off', !S.guideOn); };
     paintGd();
     ui.$('gd').addEventListener('click', () => {
@@ -646,7 +782,7 @@
     installInputLock();
     ui.$('clr').addEventListener('click', () => { const id = curTrackId(); if (id) { clearPlan(id); ui.log('已清除本赛道缓存'); } });
     ui.$('cp').addEventListener('click', async () => { const id = curTrackId(); const p = id && loadPlan(id); if (!p) { ui.log('本赛道还没有方案'); return; } try { await navigator.clipboard.writeText(p.recording); ui.log('回放串已复制'); } catch { ui.log('复制失败(浏览器不允许)'); } });
-    window.__ptai = { PT, S, prepareGuide, solve: (o) => solve(ui, o), obtainPlan: (id) => obtainPlan(ui, id ?? curTrackId()), fetchTop1, trackId64: () => trackId64(primaryIdx(), curTrackId()), planCandidates, drive: (p) => drive(p, ui), loadPlan, savePlan, curTrackId, primaryIdx, ui };
+    window.__ptai = { PT, S, prepareGuide, solve: (o) => solve(ui, o), obtainPlan: (id) => obtainPlan(ui, id ?? curTrackId()), obtainPlanTarget: (tgt, id) => obtainPlanTarget(ui, id ?? curTrackId(), tgt), resolveTargetFor: (tgt, id) => resolveTargetFor(id ?? curTrackId(), primaryIdx(), tgt), fetchTop1, trackId64: () => trackId64(primaryIdx(), curTrackId()), planCandidates, drive: (p) => drive(p, ui), loadPlan, savePlan, curTrackId, primaryIdx, ui };
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
